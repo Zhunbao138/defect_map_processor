@@ -44,6 +44,8 @@ from functools import wraps
 # 全局任务状态
 TASKS: dict[str, dict] = {}
 TASK_LOCK = threading.Lock()
+# 每个任务的取消标志 (threading.Event). cancel API 设置 Event, run_task 在每个 progress 回调里检查.
+CANCEL_FLAGS: dict[str, threading.Event] = {}
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent
@@ -398,6 +400,21 @@ def register_routes(app: Flask):
         tasks.sort(key=lambda x: x["created_at"], reverse=True)
         return jsonify({"tasks": tasks})
 
+    @app.route("/api/cancel/<task_id>", methods=["POST"])
+    @auth_required
+    def api_cancel(task_id: str):
+        """取消正在跑的任务。会在下一个 progress 回调处终止 (通常 1 张图内)。"""
+        with TASK_LOCK:
+            event = CANCEL_FLAGS.get(task_id)
+            if event is None:
+                # 任务不在跑(可能已完成/失败/从未存在)
+                task = TASKS.get(task_id)
+                if task and task.get("status") in ("completed", "failed", "cancelled"):
+                    return jsonify({"ok": True, "message": f"任务已是 {task.get('status')} 状态, 无需取消"}), 200
+                return jsonify({"ok": False, "error": f"任务 {task_id} 不在跑"}), 404
+            event.set()
+        return jsonify({"ok": True, "message": f"已请求取消 {task_id}, 将在下次 progress 回调中停止"}), 200
+
     @app.route("/api/records/<task_id>/<int:row_index>", methods=["POST", "PUT"])
     @auth_required
     def api_update_record(task_id: str, row_index: int):
@@ -474,44 +491,69 @@ def run_task(
 ):
     """后台执行处理任务。"""
 
-    def progress(stage, percent, message):
+    # 创建取消标志并加入全局表
+    cancel_event = threading.Event()
+    with TASK_LOCK:
+        CANCEL_FLAGS[task_id] = cancel_event
+
+    try:
+        def progress(stage, percent, message):
+            # 检查是否被用户取消
+            if cancel_event.is_set():
+                raise InterruptedError("任务被用户取消")
+            with TASK_LOCK:
+                if task_id in TASKS:
+                    TASKS[task_id].update(
+                        {
+                            "stage": stage,
+                            "progress": percent,
+                            "message": message,
+                            "status": "processing",
+                        }
+                    )
+
+        config = ProcessConfig(
+            file_path=file_path,
+            output_dir=output_dir,
+            enable_ocr=enable_ocr,
+            enable_split=enable_split,
+            ocr_gpu=use_gpu,
+        )
+        pipeline = ProcessPipeline(config)
+        pipeline.cancel_event = cancel_event
+        try:
+            result = pipeline.run(progress_callback=progress)
+        except InterruptedError:
+            with TASK_LOCK:
+                if task_id in TASKS:
+                    TASKS[task_id].update(
+                        {
+                            "status": "cancelled",
+                            "message": "已取消",
+                        }
+                    )
+            return
+
         with TASK_LOCK:
             if task_id in TASKS:
                 TASKS[task_id].update(
                     {
-                        "stage": stage,
-                        "progress": percent,
-                        "message": message,
-                        "status": "processing",
+                        "status": "completed" if result.success else "failed",
+                        "progress": 1.0,
+                        "message": (
+                            "处理完成"
+                            if result.success
+                            else f"失败: {result.error}"
+                        ),
+                        "stats": result.stats,
+                        "json_path": result.json_path,
+                        "excel_path": result.excel_path,
                     }
                 )
-
-    config = ProcessConfig(
-        file_path=file_path,
-        output_dir=output_dir,
-        enable_ocr=enable_ocr,
-        enable_split=enable_split,
-        ocr_gpu=use_gpu,
-    )
-    pipeline = ProcessPipeline(config)
-    result = pipeline.run(progress_callback=progress)
-
-    with TASK_LOCK:
-        if task_id in TASKS:
-            TASKS[task_id].update(
-                {
-                    "status": "completed" if result.success else "failed",
-                    "progress": 1.0,
-                    "message": (
-                        "处理完成"
-                        if result.success
-                        else f"失败: {result.error}"
-                    ),
-                    "stats": result.stats,
-                    "json_path": result.json_path,
-                    "excel_path": result.excel_path,
-                }
-            )
+    finally:
+        # 清理
+        with TASK_LOCK:
+            CANCEL_FLAGS.pop(task_id, None)
 
 
 # ============================================================================

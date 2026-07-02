@@ -68,6 +68,8 @@ class ProcessPipeline:
 
     def __init__(self, config: ProcessConfig):
         self.config = config
+        # 取消标志 (从外部注入, run_task 在每个 progress 回调里检查并 raise InterruptedError)
+        self.cancel_event = None  # type: ignore[assignment]
 
     def run(self, progress_callback=None) -> ProcessResult:
         """执行完整处理流程。
@@ -238,6 +240,9 @@ class ProcessPipeline:
                 _ocr_total = len(all_paths)
 
                 def _ocr_progress(done, total):
+                    # OCR 每张图前先检查取消, 让中断更及时
+                    if self.cancel_event is not None and self.cancel_event.is_set():
+                        raise InterruptedError("任务被用户取消")
                     report("ocr", done / total if total else 1.0,
                             f"OCR 识别中 {done}/{total} 张...")
 
