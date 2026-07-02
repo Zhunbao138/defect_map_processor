@@ -1112,3 +1112,60 @@ main {
     color: #4a5568;
     font-size: 0.88rem;
 }
+
+/* ===== 缺陷列表分页器 ===== */
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    flex-wrap: wrap;
+}
+
+.page-btn {
+    /* 复用 .btn-secondary 的视觉; 仅补一些禁用态 */
+    min-width: 90px;
+}
+
+.page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.page-indicator {
+    font-size: 0.95rem;
+    color: #2d3748;
+    min-width: 110px;
+    text-align: center;
+}
+
+.page-indicator .page-current {
+    color: #667eea;
+    font-weight: 600;
+    font-size: 1.05rem;
+}
+
+.page-size-label {
+    font-size: 0.9rem;
+    color: #4a5568;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.page-size-select {
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    background: #fff;
+    color: #2d3748;
+    cursor: pointer;
+}
+
+.page-size-select:focus {
+    outline: none;
+    border-color: #667eea;
+}
