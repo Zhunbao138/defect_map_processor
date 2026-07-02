@@ -795,14 +795,9 @@ async function selectTask(taskId) {
     }
 }
 
-// ===== 下载 =====
 // ===== 下载 (按当前 filter+sort) =====
-// 8 张图: 2 张原图 + 2 套三视图(俯视图 / 长边 / 短边); 还多 1 张视图标注预览-1/-2
-const EXPORT_IMG_KEYS = [
-    '视图标注预览-1', '图-1', '俯视图-1', '长边方向侧视图-1', '短边方向侧视图-1',
-    '视图标注预览-2', '图-2', '俯视图-2', '长边方向侧视图-2', '短边方向侧视图-2',
-];
-
+// JSON 导出 (前端生成): 文本 + OCR 参数 + warnings
+// xlsx 导出 (后端 openpyxl 生成): 通过 GET /api/image/<task>/defect_records.xlsx
 const EXPORT_COLS = [
     { key: '序号', label: '序号' },
     { key: '生产厂', label: '生产厂' },
@@ -810,24 +805,22 @@ const EXPORT_COLS = [
     { key: '钢种', label: '钢种' },
     { key: '类别', label: '类别' },
     { key: '缺陷分析', label: '缺陷分析' },
-    { key: '视图标注预览-1', label: '标注预览-1', kind: 'image' },
-    { key: '图-1', label: '原图-1', kind: 'image' },
-    { key: '俯视图-1', label: '俯视图-1', kind: 'image' },
-    { key: '长边方向侧视图-1', label: '长边-1', kind: 'image' },
-    { key: '短边方向侧视图-1', label: '短边-1', kind: 'image' },
-    { key: '视图标注预览-2', label: '标注预览-2', kind: 'image' },
-    { key: '图-2', label: '原图-2', kind: 'image' },
-    { key: '俯视图-2', label: '俯视图-2', kind: 'image' },
-    { key: '长边方向侧视图-2', label: '长边-2', kind: 'image' },
-    { key: '短边方向侧视图-2', label: '短边-2', kind: 'image' },
-    { key: '_材料尺寸', label: '材料尺寸', param: '材料尺寸' },
-    { key: '_缺陷中心X', label: '中心X', param: '缺陷中心X' },
-    { key: '_缺陷中心Y', label: '中心Y', param: '缺陷中心Y' },
-    { key: '_缺陷长度', label: '长度', param: '缺陷长度' },
-    { key: '_缺陷宽度', label: '宽度', param: '缺陷宽度' },
-    { key: '_缺陷深度', label: '深度', param: '缺陷深度' },
-    { key: '_缺陷面积', label: '面积', param: '缺陷面积' },
-    { key: '_C扫描值', label: 'C扫描值', param: 'C扫描值' },
+    { key: '图-1', label: '图-1' },
+    { key: '图-2', label: '图-2' },
+    { key: '俯视图-1', label: '俯视图-1' },
+    { key: '长边方向侧视图-1', label: '长边方向侧视图-1' },
+    { key: '短边方向侧视图-1', label: '短边方向侧视图-1' },
+    { key: '俯视图-2', label: '俯视图-2' },
+    { key: '长边方向侧视图-2', label: '长边方向侧视图-2' },
+    { key: '短边方向侧视图-2', label: '短边方向侧视图-2' },
+    { key: '材料尺寸', label: '材料尺寸', param: '材料尺寸' },
+    { key: '缺陷中心X', label: '缺陷中心X', param: '缺陷中心X' },
+    { key: '缺陷中心Y', label: '缺陷中心Y', param: '缺陷中心Y' },
+    { key: '缺陷长度', label: '缺陷长度', param: '缺陷长度' },
+    { key: '缺陷宽度', label: '缺陷宽度', param: '缺陷宽度' },
+    { key: '缺陷深度', label: '缺陷深度', param: '缺陷深度' },
+    { key: '缺陷面积', label: '缺陷面积', param: '缺陷面积' },
+    { key: 'C扫描值', label: 'C扫描值', param: 'C扫描值' },
     { key: 'warnings', label: '警告', list: true },
 ];
 
@@ -838,13 +831,9 @@ function buildExportRows() {
         const params = rec['缺陷数据'] || {};
         for (const c of EXPORT_COLS) {
             if (c.key === '序号') continue;
-            if (c.kind === 'image') {
-                row[c.key] = rec[c.key] || null;
-            } else if (c.param) {
+            if (c.param) {
                 const v = params[c.param];
-                // 用 param 自己的名字(去掉下划线前缀)作为 row key, 让 JSON 也好看
-                const rowKey = c.key.startsWith('_') ? c.key.slice(1) : c.key;
-                row[rowKey] = v != null && v !== '' ? v : '';
+                row[c.key] = v != null && v !== '' ? v : '';
             } else if (c.list) {
                 const arr = rec[c.key];
                 row[c.key] = Array.isArray(arr) && arr.length ? arr.join('; ') : '';
@@ -854,33 +843,6 @@ function buildExportRows() {
         }
         return row;
     });
-}
-
-// 把 image 路径转成可访问的 URL (与详情弹窗同一套规则)
-function imageUrl(absPath) {
-    if (!absPath) return null;
-    return `/api/image/${currentTaskId}/${relPath(absPath)}`;
-}
-
-// 抓一张图的二进制, 返回 { bytes: Uint8Array, ext: 'png'|'jpeg' } 或 null
-async function fetchImageBytes(absPath) {
-    const url = imageUrl(absPath);
-    if (!url) return null;
-    try {
-        const resp = await fetch(url);
-        if (!resp.ok) return null;
-        const buf = await resp.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        const lower = url.toLowerCase();
-        const ext = lower.endsWith('.png') ? 'png'
-                  : lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'jpeg'
-                  : lower.endsWith('.gif') ? 'gif'
-                  : 'png';
-        return { bytes, ext };
-    } catch (e) {
-        console.error('fetchImageBytes failed:', url, e);
-        return null;
-    }
 }
 
 function downloadBlob(content, filename, mime) {
@@ -906,324 +868,13 @@ document.getElementById('download-json').addEventListener('click', () => {
     downloadBlob(JSON.stringify(payload, null, 2), 'defect_records_' + currentTaskId + '.json', 'application/json');
 });
 
-// ========== OOXML (.xlsx) 构造 ==========
-// 用 JSZip 拼出真实的 .xlsx zip, 内嵌图-1/图-2 原图。
+// (Excel 导出改成后端 openpyxl 生成, 见 app.py 里的 /api/export/xlsx/<task_id> 端点)
+// 客户端只需要触发下载即可, 不再手工拼 OOXML.
 
-// 把 colIdx (0-based) 转成 Excel 字母列名 (0->A, 1->B, ..., 26->AA)
-function colLetter(colIdx) {
-    let s = '';
-    let n = colIdx;
-    while (true) {
-        s = String.fromCharCode(65 + (n % 26)) + s;
-        n = Math.floor(n / 26) - 1;
-        if (n < 0) break;
-    }
-    return s;
-}
-
-// XML 字符转义
-function xEsc(s) {
-    return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-// Excel 内置列宽单位很怪: 1 char ≈ 7 px, 但我们用 8 像素/字符单位 (Excel 内部用字符宽度)
-// 这里我们直接用 pixel 估算, 乘以 ~256/8 让 Excel 接受
-function pixelsToXlsxWidth(px) {
-    return Math.max(1, Math.round(px * 256 / 8));
-}
-
-// 高度用磅 (1 pt = 1/72 inch); 110px ≈ 82pt
-function pixelsToRowHeightPt(px) {
-    return Math.round(px * 72 / 96);  // 假设 96 dpi
-}
-
-async function buildXlsxFile(rows) {
-    if (typeof JSZip === 'undefined') {
-        throw new Error('JSZip 未加载 (检查网络)');
-    }
-
-    // 1) 抓所有图片, 收集进 mediaImages 数组
-    const imgJobs = [];
-    const imgKeys = [];   // 与 imgJobs 平行: 记录每张图对应的 (rowIdx, colKey)
-    for (let i = 0; i < rows.length; i++) {
-        for (const k of EXPORT_IMG_KEYS) {
-            const p = rows[i][k];
-            if (p) {
-                imgJobs.push(fetchImageBytes(p));
-                imgKeys.push({ rowIdx: i, colKey: k });
-            }
-        }
-    }
-    const imgResults = await Promise.all(imgJobs);
-    // 收集成功的图片: { idx, ext, bytes, rowIdx, colKey }
-    const mediaImages = [];
-    for (let i = 0; i < imgResults.length; i++) {
-        const r = imgResults[i];
-        if (r) {
-            mediaImages.push({
-                idx: mediaImages.length,
-                ext: r.ext,
-                bytes: r.bytes,
-                rowIdx: imgKeys[i].rowIdx,
-                colKey: imgKeys[i].colKey,
-            });
-        }
-    }
-
-    // 2) 列宽配置 (像素)
-    const colPxWidths = EXPORT_COLS.map(c => {
-        if (c.kind === 'image') return 180;
-        if (c.key === '钢板号' || c.key === '钢种') return 140;
-        if (c.key === '缺陷分析') return 160;
-        return 80;
-    });
-    const headerRowPxHeight = 24;
-    const dataRowPxHeight = 110;   // 行高足够展示图
-
-    // 3) 构建 sheet1.xml
-    //   - 表头行 (索引 1)
-    //   - 数据行 (索引 2..N+1)
-    //   - <drawing r:id="rId1"/> 引用 drawing
-    const sheetRows = [];
-    // 表头
-    let headerCells = '';
-    EXPORT_COLS.forEach((c, ci) => {
-        headerCells += `<c r="${colLetter(ci)}1" s="1" t="inlineStr"><is><t>${xEsc(c.label)}</t></is></c>`;
-    });
-    sheetRows.push(`<row r="1" ht="${pixelsToRowHeightPt(headerRowPxHeight)}" customHeight="1">${headerCells}</row>`);
-
-    // 数据行
-    for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        const excelRow = i + 2;
-        let cells = '';
-        EXPORT_COLS.forEach((c, ci) => {
-            // param 列在 buildExportRows 里被存到 c.key.slice(1); 其它列用 c.key
-            const lookupKey = c.param ? c.key.slice(1) : c.key;
-            const v = r[lookupKey];
-            const col = colLetter(ci);
-            if (c.kind === 'image') {
-                // 留空 (图片在 drawing 里通过 anchor 覆盖在 cell 上)
-                cells += `<c r="${col}${excelRow}"/>`;
-            } else if (v == null || v === '') {
-                cells += `<c r="${col}${excelRow}"/>`;
-            } else if (typeof v === 'number') {
-                cells += `<c r="${col}${excelRow}"><v>${v}</v></c>`;
-            } else {
-                cells += `<c r="${col}${excelRow}" t="inlineStr"><is><t xml:space="preserve">${xEsc(v)}</t></is></c>`;
-            }
-        });
-        sheetRows.push(`<row r="${excelRow}" ht="${pixelsToRowHeightPt(dataRowPxHeight)}" customHeight="1">${cells}</row>`);
-    }
-
-    // cols (列宽)
-    let colsXml = '<cols>';
-    EXPORT_COLS.forEach((c, ci) => {
-        const w = pixelsToXlsxWidth(colPxWidths[ci]);
-        colsXml += `<col min="${ci + 1}" max="${ci + 1}" width="${w}" customWidth="1"/>`;
-    });
-    colsXml += '</cols>';
-
-    // sheetView: 冻结表头
-    const sheetView = `<sheetView tabSelected="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView>`;
-
-    // drawing 引用 (如果有任何图片)
-    const drawingRef = mediaImages.length > 0
-        ? '<drawing r:id="rId1"/>'
-        : '';
-
-    const sheet1Xml =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-        sheetView +
-        '<sheetFormatPr defaultRowHeight="15"/>' +
-        colsXml +
-        '<sheetData>' + sheetRows.join('') + '</sheetData>' +
-        drawingRef +
-        '</worksheet>';
-
-    // 4) drawing1.xml
-    //    每个图片用 <xdr:twoCellAnchor> 定位到 (rowIdx+2, colIdx) 到 (rowIdx+3, colIdx+1)
-    //    图片的 rId 通过 drawing1.xml.rels 解析
-    function drawingForImage(img) {
-        const ci = EXPORT_COLS.findIndex(c => c.key === img.colKey);
-        const excelRow = img.rowIdx + 2;     // 1-based, +1 表头
-        const fromCol = ci, toCol = ci + 1;
-        const fromRow = excelRow - 1, toRow = excelRow;   // 0-based; 图片"覆盖"在数据行上
-        return (
-            `<xdr:twoCellAnchor>` +
-                `<xdr:from><xdr:col>${fromCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
-                `<xdr:row>${fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
-                `<xdr:to><xdr:col>${toCol}</xdr:col><xdr:colOff>0</xdr:colOff>` +
-                `<xdr:row>${toRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
-                `<xdr:pic>` +
-                    `<xdr:nvPicPr>` +
-                        `<xdr:cNvPr id="${img.idx + 1}" name="img${img.idx + 1}"/>` +
-                        `<xdr:cNvPicPr/>` +
-                    `</xdr:nvPicPr>` +
-                    `<xdr:blipFill>` +
-                        `<a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rId${img.idx + 1}"/>` +
-                        `<a:stretch xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:fillRect/></a:stretch>` +
-                    `</xdr:blipFill>` +
-                    `<xdr:spPr>` +
-                        // 注: 不要在这里放 <a:xfrm>; twoCellAnchor 的 from/to 已经决定尺寸和位置.
-                        // 加 xfrm 会让部分渲染器(WPS)强制按 cx/cy 渲染, 把 16:9 图压成正方形.
-                        `<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="rect"><a:avLst/></a:prstGeom>` +
-                    `</xdr:spPr>` +
-                `</xdr:pic>` +
-                `<xdr:clientData/>` +
-            `</xdr:twoCellAnchor>`
-        );
-    }
-    const drawing1Xml = mediaImages.length === 0
-        ? ''
-        : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-          '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ' +
-          'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
-          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-          mediaImages.map(drawingForImage).join('') +
-          '</xdr:wsDr>';
-
-    // 5) 各种 .rels
-    const relsRoot =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
-        '</Relationships>';
-
-    const workbookRels =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
-            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
-        '</Relationships>';
-
-    const sheetRels = mediaImages.length === 0
-        ? ''
-        : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-              '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>' +
-          '</Relationships>';
-
-    const drawingRels =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-            mediaImages.map(img =>
-                `<Relationship Id="rId${img.idx + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image${img.idx + 1}.${img.ext}"/>`
-            ).join('') +
-        '</Relationships>';
-
-    // 6) workbook.xml
-    const workbookXml =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-            '<sheets>' +
-                '<sheet name="缺陷记录" sheetId="1" r:id="rId1"/>' +
-            '</sheets>' +
-        '</workbook>';
-
-    // 7) styles.xml — 至少 2 个样式:
-    //    0: 默认
-    //    1: 表头 (粗体 + 灰底)
-    const stylesXml =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-            '<fonts count="2">' +
-                '<font><sz val="11"/><name val="Calibri"/></font>' +
-                '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
-            '</fonts>' +
-            '<fills count="3">' +
-                '<fill><patternFill patternType="none"/></fill>' +
-                '<fill><patternFill patternType="gray125"/></fill>' +
-                '<fill><patternFill patternType="solid"><fgColor rgb="FFDDDDDD"/><bgColor indexed="64"/></patternFill></fill>' +
-            '</fills>' +
-            '<borders count="1"><border/></borders>' +
-            '<cellStyleXfs count="1"><xf/></cellStyleXfs>' +
-            '<cellXfs count="2">' +
-                '<xf fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-                '<xf fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
-            '</cellXfs>' +
-            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
-        '</styleSheet>';
-
-    // 8) [Content_Types].xml
-    //    至少包含: workbook, styles, sheet1; 有图片则加 png/jpeg/gif 默认
-    const defaultTypes = [];
-    // 对每个图片 ext 加一个 Default 声明
-    const exts = new Set(mediaImages.map(m => m.ext));
-    for (const e of exts) {
-        const mime = e === 'png' ? 'image/png' : e === 'jpeg' ? 'image/jpeg' : 'image/gif';
-        defaultTypes.push(`<Default Extension="${e}" ContentType="${mime}"/>`);
-    }
-    const overrides = [
-        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
-        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
-    ];
-    if (drawing1Xml) {
-        overrides.push('<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>');
-    }
-    const contentTypesXml =
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-            '<Default Extension="xml" ContentType="application/xml"/>' +
-            defaultTypes.join('') +
-            overrides.join('') +
-        '</Types>';
-
-    // 9) 用 JSZip 打包
-    const zip = new JSZip();
-    zip.file('[Content_Types].xml', contentTypesXml);
-    zip.file('_rels/.rels', relsRoot);
-    zip.folder('xl').file('workbook.xml', workbookXml);
-    zip.folder('xl').folder('_rels').file('workbook.xml.rels', workbookRels);
-    zip.folder('xl').file('styles.xml', stylesXml);
-    zip.folder('xl/worksheets').file('sheet1.xml', sheet1Xml);
-    if (sheetRels) {
-        zip.folder('xl/worksheets/_rels').file('sheet1.xml.rels', sheetRels);
-    }
-    if (drawing1Xml) {
-        zip.folder('xl/drawings').file('drawing1.xml', drawing1Xml);
-        zip.folder('xl/drawings/_rels').file('drawing1.xml.rels', drawingRels);
-    }
-    for (const img of mediaImages) {
-        zip.folder('xl/media').file(`image${img.idx + 1}.${img.ext}`, img.bytes);
-    }
-    return await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-}
-
-document.getElementById('download-excel').addEventListener('click', async () => {
+document.getElementById('download-excel').addEventListener('click', () => {
     if (!currentTaskId) return;
-    const btn = document.getElementById('download-excel');
-    const origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '⏳ 抓图中...';
-    try {
-        const rows = buildExportRows();
-        const blob = await buildXlsxFile(rows);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'defect_records_' + currentTaskId + '.xlsx';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (err) {
-        console.error('Excel download failed:', err);
-        alert('导出失败: ' + err.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = origText;
-    }
+    // 后端 openpyxl 生成的 xlsx, 通过 /api/image/<task>/defect_records.xlsx 提供下载
+    window.location.href = `/api/image/${currentTaskId}/defect_records.xlsx`;
 });
 
 
