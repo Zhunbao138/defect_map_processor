@@ -103,9 +103,11 @@ class ImageExtractor:
         _ = sheet_name
 
         results = []
-        # 只提取 F 列 (col=5) 的图片, 即"缺陷图谱"列
-        # F 列本身就有两张图 (整体图谱 + 局部放大图谱)
-        TARGET_COL = 5  # 0-based, F 列
+        # 旧格式: F 列 (col=5) 有 2 张图 (整体图谱 + 局部放大图谱)
+        # 新格式: F 列只有 1 张图, G 列 (col=6) 有第 2 张图
+        # 兼容两种: 收集 F + G 列的所有图, 按 (列号, 在 ws._images 里的原始顺序) 排序
+        # 第一个图 = 图-1, 第二个 = 图-2
+        TARGET_COLS = (5, 6)  # 0-based, F 列 + G 列
 
         # 收集每行的所有图片
         row_to_images: dict[int, list] = {}
@@ -117,11 +119,18 @@ class ImageExtractor:
             row_idx = from_anchor.row + 1  # 0-based → 1-based
             col_idx = from_anchor.col
 
-            # 只看 F 列
-            if col_idx != TARGET_COL:
+            # 只看 F/G 列
+            if col_idx not in TARGET_COLS:
                 continue
 
-            row_to_images.setdefault(row_idx, []).append(img_obj)
+            row_to_images.setdefault(row_idx, []).append((col_idx, img_idx, img_obj))
+
+        # 按 (列号, 在 sheet 里的原始顺序) 排序, 这样跨 F/G 取图也是有序的
+        for row_idx in row_to_images:
+            row_to_images[row_idx].sort(key=lambda t: (t[0], t[1]))
+        # 转回 (img_obj) 列表
+        for row_idx in row_to_images:
+            row_to_images[row_idx] = [t[2] for t in row_to_images[row_idx]]
 
         # 每张图归属于其锚点行 (WPS 中直接显示的位置)
         for row_idx in sorted(row_to_images.keys()):
