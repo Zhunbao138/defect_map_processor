@@ -1003,7 +1003,9 @@ async function buildXlsxFile(rows) {
         const excelRow = i + 2;
         let cells = '';
         EXPORT_COLS.forEach((c, ci) => {
-            const v = r[c.key];
+            // param 列在 buildExportRows 里被存到 c.key.slice(1); 其它列用 c.key
+            const lookupKey = c.param ? c.key.slice(1) : c.key;
+            const v = r[lookupKey];
             const col = colLetter(ci);
             if (c.kind === 'image') {
                 // 留空 (图片在 drawing 里通过 anchor 覆盖在 cell 上)
@@ -1070,9 +1072,8 @@ async function buildXlsxFile(rows) {
                         `<a:stretch xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:fillRect/></a:stretch>` +
                     `</xdr:blipFill>` +
                     `<xdr:spPr>` +
-                        `<a:xfrm xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
-                            `<a:off x="0" y="0"/><a:ext cx="1500000" cy="1100000"/>` +
-                        `</a:xfrm>` +
+                        // 注: 不要在这里放 <a:xfrm>; twoCellAnchor 的 from/to 已经决定尺寸和位置.
+                        // 加 xfrm 会让部分渲染器(WPS)强制按 cx/cy 渲染, 把 16:9 图压成正方形.
                         `<a:prstGeom xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" prst="rect"><a:avLst/></a:prstGeom>` +
                     `</xdr:spPr>` +
                 `</xdr:pic>` +
