@@ -804,6 +804,8 @@ const EXPORT_COLS = [
     { key: '钢种', label: '钢种' },
     { key: '类别', label: '类别' },
     { key: '缺陷分析', label: '缺陷分析' },
+    { key: '图-1', label: '图-1', kind: 'image' },
+    { key: '图-2', label: '图-2', kind: 'image' },
 ];
 
 function buildExportRows() {
@@ -812,10 +814,51 @@ function buildExportRows() {
         const row = { '序号': i + 1 };
         for (const c of EXPORT_COLS) {
             if (c.key === '序号') continue;
-            row[c.key] = rec[c.key] != null ? rec[c.key] : '';
+            if (c.kind === 'image') {
+                // 保存原始路径, 后面 fetch + 转 base64
+                row[c.key] = rec[c.key] || null;
+            } else {
+                row[c.key] = rec[c.key] != null ? rec[c.key] : '';
+            }
         }
         return row;
     });
+}
+
+// 把 image 路径转成可访问的 URL (与详情弹窗同一套规则)
+function imageUrl(absPath) {
+    if (!absPath) return null;
+    return `/api/image/${currentTaskId}/${relPath(absPath)}`;
+}
+
+// 抓一张图, 返回 data URI (data:image/xxx;base64,...) 或 null (失败)
+async function fetchImageAsDataUri(absPath) {
+    const url = imageUrl(absPath);
+    if (!url) return null;
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const buf = await resp.arrayBuffer();
+        // 通过 base64 编码, 再用 data URI
+        const bytes = new Uint8Array(buf);
+        // 处理大文件: 分块 base64 避免 call stack
+        const CHUNK = 0x8000;
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+            bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+        }
+        const b64 = btoa(bin);
+        // 简单按 .png/.jpg 推断 mime; 实际以后端 content-type 为准
+        const lower = url.toLowerCase();
+        const mime = lower.endsWith('.png') ? 'image/png'
+                   : lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'image/jpeg'
+                   : lower.endsWith('.gif') ? 'image/gif'
+                   : 'image/png';
+        return `data:${mime};base64,${b64}`;
+    } catch (e) {
+        console.error('fetchImageAsDataUri failed:', url, e);
+        return null;
+    }
 }
 
 function downloadBlob(content, filename, mime) {
@@ -841,31 +884,94 @@ document.getElementById('download-json').addEventListener('click', () => {
     downloadBlob(JSON.stringify(payload, null, 2), 'defect_records_' + currentTaskId + '.json', 'application/json');
 });
 
-document.getElementById('download-excel').addEventListener('click', () => {
+document.getElementById('download-excel').addEventListener('click', async () => {
     if (!currentTaskId) return;
-    const rows = buildExportRows();
-    const headers = EXPORT_COLS.map(c => c.label);
-    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
-    xml += '<?mso-application progid="Excel.Sheet"?>\n';
-    xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
-        + 'xmlns:o="urn:schemas-microsoft-com:office:office" '
-        + 'xmlns:x="urn:schemas-microsoft-com:office:excel" '
-        + 'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n';
-    xml += '<Styles><Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#DDDDDD" ss:Pattern="Solid"/></Style></Styles>\n';
-    xml += '<Worksheet ss:Name="缺陷记录"><Table>\n';
-    xml += '<Row>' + headers.map(h => '<Cell ss:StyleID="header"><Data ss:Type="String">' + escapeXml(h) + '</Data></Cell>').join('') + '</Row>\n';
-    for (const r of rows) {
-        const cells = headers.map(h => {
-            const k = EXPORT_COLS.find(c => c.label === h).key;
-            const v = r[k];
-            if (v == null || v === '') return '<Cell><Data ss:Type="String"></Data></Cell>';
-            if (typeof v === 'number') return '<Cell><Data ss:Type="Number">' + v + '</Data></Cell>';
-            return '<Cell><Data ss:Type="String">' + escapeXml(v) + '</Data></Cell>';
-        }).join('');
-        xml += '<Row>' + cells + '</Row>\n';
+    const btn = document.getElementById('download-excel');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ 抓图中...';
+    try {
+        const rows = buildExportRows();
+
+        // 1) 并发抓取所有原图, 一次性拿到所有 data URI
+        const imgJobs = [];
+        for (const r of rows) {
+            for (const k of ['图-1', '图-2']) {
+                const p = r[k];
+                if (p) imgJobs.push(fetchImageAsDataUri(p));
+            }
+        }
+        const dataUris = await Promise.all(imgJobs);
+        // 把 data URI 重新映射回 (rowIdx, key)
+        const uriMap = new Map();   // "rowIdx|key" -> dataUri | null
+        let idx = 0;
+        for (let i = 0; i < rows.length; i++) {
+            for (const k of ['图-1', '图-2']) {
+                if (rows[i][k]) uriMap.set(`${i}|${k}`, dataUris[idx++] || null);
+            }
+        }
+
+        // 2) 生成 SpreadsheetML
+        const headers = EXPORT_COLS.map(c => c.label);
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+        xml += '<?mso-application progid="Excel.Sheet"?>\n';
+        xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+            + 'xmlns:o="urn:schemas-microsoft-com:office:office" '
+            + 'xmlns:x="urn:schemas-microsoft-com:office:excel" '
+            + 'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet" '
+            + 'xmlns:html="http://www.w3.org/TR/REC-html40">\n';
+        xml += '<Styles>'
+            + '<Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#DDDDDD" ss:Pattern="Solid"/></Style>'
+            + '<Style ss:ID="imageCell"><Alignment ss:Vertical="Center" ss:Horizontal="Center"/></Style>'
+            + '</Styles>\n';
+        xml += '<Worksheet ss:Name="缺陷记录"><Table>\n';
+
+        // 列宽: 文本列给一个合理默认, 图片列给大列宽
+        const colWidths = [];
+        for (const c of EXPORT_COLS) {
+            if (c.kind === 'image') colWidths.push('180');          // 图片列宽 ~180
+            else if (c.key === '钢板号' || c.key === '钢种') colWidths.push('140');
+            else if (c.key === '缺陷分析') colWidths.push('160');
+            else colWidths.push('80');
+        }
+        // 用 <Column> 声明每列宽
+        for (let i = 0; i < colWidths.length; i++) {
+            xml += `<Column ss:Index="${i + 1}" ss:AutoFitWidth="0" ss:Width="${colWidths[i]}"/>`;
+        }
+
+        // 表头
+        xml += '<Row>' + headers.map(h => '<Cell ss:StyleID="header"><Data ss:Type="String">' + escapeXml(h) + '</Data></Cell>').join('') + '</Row>\n';
+
+        // 数据行
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const cells = EXPORT_COLS.map(c => {
+                const v = r[c.key];
+                if (c.kind === 'image') {
+                    const uri = uriMap.get(`${i}|${c.key}`);
+                    if (!uri) {
+                        return '<Cell ss:StyleID="imageCell"><Data ss:Type="String">无图</Data></Cell>';
+                    }
+                    // Excel 支持 <html:img> 内嵌 data URI; src 必须是有效 URL, data URI 可用
+                    const imgTag = `<html:img src="${escapeXml(uri)}" width="160" height="120"/>`;
+                    return `<Cell ss:StyleID="imageCell"><Data ss:Type="String">${escapeXml(imgTag)}</Data></Cell>`;
+                }
+                if (v == null || v === '') return '<Cell><Data ss:Type="String"></Data></Cell>';
+                if (typeof v === 'number') return '<Cell><Data ss:Type="Number">' + v + '</Data></Cell>';
+                return '<Cell><Data ss:Type="String">' + escapeXml(v) + '</Data></Cell>';
+            }).join('');
+            // 行高: ~130 让图能完整显示
+            xml += `<Row ss:AutoFitHeight="0" ss:Height="130">${cells}</Row>\n`;
+        }
+        xml += '</Table></Worksheet></Workbook>';
+        downloadBlob(xml, 'defect_records_' + currentTaskId + '.xls', 'application/vnd.ms-excel');
+    } catch (err) {
+        console.error('Excel download failed:', err);
+        alert('导出失败: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
     }
-    xml += '</Table></Worksheet></Workbook>';
-    downloadBlob(xml, 'defect_records_' + currentTaskId + '.xls', 'application/vnd.ms-excel');
 });
 
 
