@@ -136,6 +136,12 @@ let currentSort = { col: null, dir: 'none' };  // 'none' | 'asc' | 'desc'
 const FILTER_COLS = ['生产厂', '钢板号', '钢种', '类别', '缺陷分析'];
 const filterState = {};
 
+// 分页状态
+const paginationState = {
+    page: 1,        // 1-based 当前页
+    pageSize: 20,   // 每页条数, 可选 10 / 20 / 50 / 100
+};
+
 function rebuildFilterDistinct() {
     for (const col of FILTER_COLS) {
         const set = new Set();
@@ -188,14 +194,31 @@ function getDisplayedRecords() {
     return arr;
 }
 
+function renderPagination(displayedCount) {
+    // TODO(pagination): real implementation in next task
+    const bar = document.getElementById('pagination-bar');
+    if (bar) bar.innerHTML = '';
+}
+
+function getPagedRecords(records) {
+    const totalPages = Math.max(1, Math.ceil(records.length / paginationState.pageSize));
+    // 防御性钳制: page 必须在 [1, totalPages]
+    if (paginationState.page < 1) paginationState.page = 1;
+    if (paginationState.page > totalPages) paginationState.page = totalPages;
+    const start = (paginationState.page - 1) * paginationState.pageSize;
+    return records.slice(start, start + paginationState.pageSize);
+}
+
 function renderRecords() {
-    const displayed = getDisplayedRecords();
+    const displayed = getDisplayedRecords();           // filter + sort
+    const paged = getPagedRecords(displayed);          // + paginate
     document.getElementById('record-count').textContent = displayed.length;
     const tbody = document.getElementById('record-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    displayed.forEach(rec => tbody.appendChild(createRecordRow(rec)));
+    paged.forEach(rec => tbody.appendChild(createRecordRow(rec)));
     updateSortIndicators();
+    renderPagination(displayed.length);                 // 新增: 渲染分页器
     // 同步表头筛选按钮状态 (有筛选时高亮)
     document.querySelectorAll('.th-filter-btn').forEach(b => {
         const c = b.dataset.col;
