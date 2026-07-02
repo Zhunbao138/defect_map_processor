@@ -797,6 +797,12 @@ async function selectTask(taskId) {
 
 // ===== 下载 =====
 // ===== 下载 (按当前 filter+sort) =====
+// 8 张图: 2 张原图 + 2 套三视图(俯视图 / 长边 / 短边); 还多 1 张视图标注预览-1/-2
+const EXPORT_IMG_KEYS = [
+    '视图标注预览-1', '图-1', '俯视图-1', '长边方向侧视图-1', '短边方向侧视图-1',
+    '视图标注预览-2', '图-2', '俯视图-2', '长边方向侧视图-2', '短边方向侧视图-2',
+];
+
 const EXPORT_COLS = [
     { key: '序号', label: '序号' },
     { key: '生产厂', label: '生产厂' },
@@ -804,19 +810,44 @@ const EXPORT_COLS = [
     { key: '钢种', label: '钢种' },
     { key: '类别', label: '类别' },
     { key: '缺陷分析', label: '缺陷分析' },
-    { key: '图-1', label: '图-1', kind: 'image' },
-    { key: '图-2', label: '图-2', kind: 'image' },
+    { key: '视图标注预览-1', label: '标注预览-1', kind: 'image' },
+    { key: '图-1', label: '原图-1', kind: 'image' },
+    { key: '俯视图-1', label: '俯视图-1', kind: 'image' },
+    { key: '长边方向侧视图-1', label: '长边-1', kind: 'image' },
+    { key: '短边方向侧视图-1', label: '短边-1', kind: 'image' },
+    { key: '视图标注预览-2', label: '标注预览-2', kind: 'image' },
+    { key: '图-2', label: '原图-2', kind: 'image' },
+    { key: '俯视图-2', label: '俯视图-2', kind: 'image' },
+    { key: '长边方向侧视图-2', label: '长边-2', kind: 'image' },
+    { key: '短边方向侧视图-2', label: '短边-2', kind: 'image' },
+    { key: '_材料尺寸', label: '材料尺寸', param: '材料尺寸' },
+    { key: '_缺陷中心X', label: '中心X', param: '缺陷中心X' },
+    { key: '_缺陷中心Y', label: '中心Y', param: '缺陷中心Y' },
+    { key: '_缺陷长度', label: '长度', param: '缺陷长度' },
+    { key: '_缺陷宽度', label: '宽度', param: '缺陷宽度' },
+    { key: '_缺陷深度', label: '深度', param: '缺陷深度' },
+    { key: '_缺陷面积', label: '面积', param: '缺陷面积' },
+    { key: '_C扫描值', label: 'C扫描值', param: 'C扫描值' },
+    { key: 'warnings', label: '警告', list: true },
 ];
 
 function buildExportRows() {
     const displayed = getDisplayedRecords();
     return displayed.map((rec, i) => {
         const row = { '序号': i + 1 };
+        const params = rec['缺陷数据'] || {};
         for (const c of EXPORT_COLS) {
             if (c.key === '序号') continue;
             if (c.kind === 'image') {
-                // 保存原始路径, 后面 fetch + 转 base64
                 row[c.key] = rec[c.key] || null;
+            } else if (c.param) {
+                const v = params[c.param];
+                // 用 param 自己的名字(去掉下划线前缀)作为 row key, 让 JSON 也好看
+                const rowKey = c.key.startsWith('_') ? c.key.slice(1) : c.key;
+                row[rowKey] = v != null && v !== '' ? v : '';
+            } else if (c.list) {
+                const arr = rec[c.key];
+                row[c.key] = Array.isArray(arr) && arr.length ? arr.join('; ') : '';
             } else {
                 row[c.key] = rec[c.key] != null ? rec[c.key] : '';
             }
@@ -920,7 +951,7 @@ async function buildXlsxFile(rows) {
     const imgJobs = [];
     const imgKeys = [];   // 与 imgJobs 平行: 记录每张图对应的 (rowIdx, colKey)
     for (let i = 0; i < rows.length; i++) {
-        for (const k of ['图-1', '图-2']) {
+        for (const k of EXPORT_IMG_KEYS) {
             const p = rows[i][k];
             if (p) {
                 imgJobs.push(fetchImageBytes(p));
