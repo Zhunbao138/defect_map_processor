@@ -213,14 +213,20 @@ class DataMerger:
     # 空图片列的默认行高 (磅), 用于无图的行让版式不至于太扁
     _EMPTY_IMAGE_ROW_HEIGHT = 15
 
-    def _embed_image(self, ws, cell, img_path: str):
-        """将图片嵌入到指定单元格, 保留图片原始像素尺寸。
+    # 图片在 xlsx 中显示的缩放比例 (相对于原始像素).
+    # 原图字节不变, 只是 openpyxl 写入的显示尺寸缩小; 实际 PNG 仍是 1920×1080 等.
+    # ¼ → 1920×1080 显示为 480×270, 单元格不至于撑爆.
+    _DISPLAY_SCALE = 0.25
 
-        行高 / 列宽根据原图的实际像素尺寸计算, 不再做等比缩放。
+    def _embed_image(self, ws, cell, img_path: str):
+        """将图片嵌入到指定单元格。
+
+        原图像素不变, 仅按 _DISPLAY_SCALE 缩小在 xlsx 中显示的尺寸 (列宽 / 行高同步).
         失败时 (路径不存在 / 不支持的格式) 在单元格内写回原路径字符串作为回退。
         """
         from openpyxl.drawing.image import Image as XLImage
         from openpyxl.utils import get_column_letter
+        from openpyxl.utils.units import pixels_to_EMU
 
         if not img_path:
             return
@@ -237,26 +243,37 @@ class DataMerger:
             ws.cell(row=cell.row, column=cell.column, value=f"[图片加载失败] {img_path} ({e})")
             return
 
-        # 不缩放, 直接使用原图原始像素尺寸
-        px_w = img.width or 0
-        px_h = img.height or 0
+        # 原图原始像素
+        raw_w = img.width or 0
+        raw_h = img.height or 0
+        # xlsx 中显示尺寸 (按 _DISPLAY_SCALE 缩小)
+        disp_w = int(raw_w * self._DISPLAY_SCALE) if raw_w else 0
+        disp_h = int(raw_h * self._DISPLAY_SCALE) if raw_h else 0
+        img.width = disp_w
+        img.height = disp_h
 
         # 锚定到单元格
         img.anchor = cell.coordinate
         ws.add_image(img)
 
+        # openpyxl 默认用 OneCellAnchor; 其 ext 决定显示尺寸 (EMU 单位).
+        # 必须同步设 ext, 否则 Excel 仍按原图 1920×1080 显示.
+        if disp_w and disp_h and hasattr(img.anchor, 'ext') and img.anchor.ext is not None:
+            img.anchor.ext.cx = pixels_to_EMU(disp_w)
+            img.anchor.ext.cy = pixels_to_EMU(disp_h)
+
         # 列宽: openpyxl 列宽单位是字符宽度, 1 px ≈ 0.14 个字符
         col_letter = get_column_letter(cell.column)
-        if px_w:
-            target_col_width = int(px_w * 0.14) + 2
+        if disp_w:
+            target_col_width = int(disp_w * 0.14) + 2
         else:
             target_col_width = 15
         current_col_width = ws.column_dimensions[col_letter].width or 0
         ws.column_dimensions[col_letter].width = max(current_col_width, target_col_width)
 
         # 行高: openpyxl 行高单位是磅, 1 px ≈ 0.75 pt
-        if px_h:
-            target_row_height = int(px_h * 0.75) + 4
+        if disp_h:
+            target_row_height = int(disp_h * 0.75) + 4
         else:
             target_row_height = self._EMPTY_IMAGE_ROW_HEIGHT
         current_row_height = ws.row_dimensions[cell.row].height or 0
