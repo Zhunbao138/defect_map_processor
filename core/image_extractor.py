@@ -93,9 +93,14 @@ class ImageExtractor:
         openpyxl-image-loader 在某些情况下会丢失图片, 所以我们直接用 sheet._images。
         """
         wb = load_workbook(str(self.file_path))
-        if sheet_name not in wb.sheetnames:
-            raise ValueError(f"找不到 sheet: {sheet_name}，可选: {wb.sheetnames}")
-        ws = wb[sheet_name]
+        # 总是选第二个表 (按索引), 不再按名字匹配
+        if len(wb.sheetnames) < 2:
+            raise ValueError(
+                f"文件至少需要 2 个 sheet 才能解析 (当前 {len(wb.sheetnames)} 个: {wb.sheetnames})"
+            )
+        ws = wb[wb.sheetnames[1]]
+        # 保留 sheet_name 参数以便 log 提示, 但不用于选择
+        _ = sheet_name
 
         results = []
         # 只提取 F 列 (col=5) 的图片, 即"缺陷图谱"列

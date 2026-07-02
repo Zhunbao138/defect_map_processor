@@ -149,7 +149,12 @@ def embed_images_into_xlsx(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     wb = load_workbook(xlsx_path)
-    sheet = wb["Sheet2"] if "Sheet2" in wb.sheetnames else wb[wb.sheetnames[1]]
+    # 总是选第二个表 (按索引), 不再按名字匹配
+    if len(wb.sheetnames) < 2:
+        raise ValueError(
+            f"xlsx 至少需要 2 个 sheet (当前 {len(wb.sheetnames)} 个: {wb.sheetnames})"
+        )
+    sheet = wb[wb.sheetnames[1]]
 
     results = []
     for row_idx, imgs in images_by_row.items():
