@@ -123,6 +123,7 @@ async function loadRecords() {
             return;
         }
         recordsCache = data.records;  // 缓存
+        paginationState.page = 1;     // 任务完成后回到第 1 页
         renderRecords();
         document.getElementById('result-section').style.display = 'block';
     } catch (e) {
@@ -551,6 +552,7 @@ function applyFilterModal() {
         }
     });
     closeFilterModal();
+    paginationState.page = 1;   // 筛选后回到第 1 页
     renderRecords();
 }
 
@@ -609,6 +611,7 @@ document.querySelectorAll('#record-table thead th.sortable').forEach(th => {
         } else {
             currentSort = { col: null, dir: 'none' };
         }
+        paginationState.page = 1;   // 排序后回到第 1 页
         renderRecords();
     });
 });
@@ -784,6 +787,7 @@ async function selectTask(taskId) {
         if (res.ok) {
             const data = await res.json();
             recordsCache = data.records;
+            paginationState.page = 1;   // 切换任务后回到第 1 页
             renderRecords();
             document.getElementById('result-section').style.display = 'block';
         }
