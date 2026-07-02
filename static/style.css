@@ -758,7 +758,6 @@ main {
 .record-table .col-grade { width: 220px; white-space: nowrap; }
 .record-table .col-category { width: 100px; white-space: nowrap; }
 .record-table .col-defect { width: auto; }
-.record-table .col-action { width: 90px; text-align: right; }
 
 .record-table thead th {
     text-align: left;
@@ -904,12 +903,6 @@ main {
 
 .record-table .col-defect {
     color: #4a5568;
-}
-.record-table .col-action {
-    width: 90px;
-    text-align: right;
-    color: #667eea;
-    font-weight: 600;
 }
 
 @media (max-width: 700px) {

@@ -441,7 +441,6 @@ function createRecordRow(rec) {
         <td class="col-grade">${escapeHtml(rec['钢种'] || '-')}</td>
         <td><span class="col-category">${escapeHtml(rec['类别'] || '-')}</span></td>
         <td class="col-defect" title="${escapeAttr(rec['缺陷分析'] || '')}">${escapeHtml(rec['缺陷分析'] || '-')}</td>
-        <td class="col-action">查看 →</td>
     `;
     tr.addEventListener('click', () => openRecordDetail(rec));
     return tr;
