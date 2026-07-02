@@ -172,7 +172,12 @@ class ExcelImporter:
         self.import_file()
         from openpyxl import load_workbook as load_xlsx
         wb = load_xlsx(str(self.converted_xlsx_path or self.file_path), data_only=True)
-        ws = wb["Sheet2"] if "Sheet2" in wb.sheetnames else wb[wb.sheetnames[1]]
+        # 总是选第二个表 (按索引), 不再按名字 "Sheet2" 匹配
+        if len(wb.sheetnames) < 2:
+            raise ValueError(
+                f"文件至少需要 2 个 sheet 才能解析 (当前只有 {len(wb.sheetnames)} 个: {wb.sheetnames})"
+            )
+        ws = wb[wb.sheetnames[1]]
         records = []
         for row_idx in range(self.DATA_START_ROW, ws.max_row + 1):
             record = self._parse_xlsx_row(ws, row_idx)
