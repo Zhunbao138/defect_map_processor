@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# 数据库 (会随处理自动生成)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# 工具
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# 日志
+*.log
+
+# 凭据 (本地生成, 含明文密码, 不要入仓)
+.auth
+
+# input/ output/ 保留 (用户要求包含数据)
+# preview.html 是早期调试文件, 忽略
+preview.html
+static_views_links/

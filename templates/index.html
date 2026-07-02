@@ -1,0 +1,162 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>钢材缺陷图像知识库</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>🔬 钢材缺陷图像知识库</h1>
+        <p class="subtitle">导入 → 提取 → 切分 → OCR → 整合 → 展示</p>
+
+        <!-- 顶栏: 上传按钮 + 任务列表 -->
+        <div class="app-bar">
+            <button type="button" class="app-bar-btn" id="open-upload-btn">
+                📁 上传 Excel 文件
+            </button>
+            <div class="app-bar-tasks" id="app-bar-tasks">
+                <div id="task-list" class="task-list-inline">
+                    <p class="empty-inline">暂无任务</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+<!-- ========== 上传弹窗 ========== -->
+        <div class="modal upload-modal" id="upload-modal">
+            <div class="modal-content">
+                <h3>📁 上传 Excel 文件</h3>
+                <p class="hint">仅支持 <strong>.xlsx</strong> 格式 (sheet2 中的缺陷图谱列会自动提取)。如需处理 .xls, 请先用 WPS/Excel 另存为 .xlsx。</p>
+
+                <form id="upload-form">
+                    <div class="file-drop" id="file-drop">
+                        <input type="file" id="file-input" name="file" accept=".xlsx" hidden>
+                        <div class="drop-content">
+                            <div class="drop-icon">📊</div>
+                            <p>点击选择文件 或 拖拽文件到此处</p>
+                            <p class="file-name" id="file-name">未选择文件</p>
+                        </div>
+                    </div>
+
+                    <div class="options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enable-ocr" checked>
+                            启用 OCR 识别
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enable-split" checked>
+                            启用三视图切分
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="ocr-gpu">
+                            OCR GPU 加速
+                        </label>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" id="cancel-upload-btn">取消</button>
+                        <button type="submit" class="btn-primary" id="submit-btn" style="width:auto;flex:1;">
+                            开始处理
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ========== 进度区 ========== -->
+        <section class="progress-section" id="progress-section" style="display:none">
+            <div class="progress-card">
+                <h2>⏳ 处理进度</h2>
+                <div class="progress-info">
+                    <div class="progress-row">
+                        <span class="label">阶段:</span>
+                        <span class="value" id="progress-stage">-</span>
+                    </div>
+                    <div class="progress-row">
+                        <span class="label">消息:</span>
+                        <span class="value" id="progress-message">-</span>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-percent" id="progress-percent">0%</div>
+            </div>
+        </section>
+
+        <!-- ========== 结果区 ========== -->
+        <section class="result-section" id="result-section" style="display:none">
+            <div class="result-header">
+                <h2>📊 缺陷记录 (<span id="record-count">0</span>)</h2>
+                <div class="result-actions">
+                    <button class="btn-secondary" id="download-json">下载 JSON</button>
+                    <button class="btn-secondary" id="download-excel">下载 Excel</button>
+                </div>
+            </div>
+
+            <table class="record-table" id="record-table">
+                <thead>
+                    <tr>
+                        <th class="col-index sortable" data-col="序号">
+                            <span class="th-content"># <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="序号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-factory sortable" data-col="生产厂">
+                            <span class="th-content">生产厂 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="生产厂" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-plate sortable" data-col="钢板号">
+                            <span class="th-content">钢板号 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="钢板号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-grade sortable" data-col="钢种">
+                            <span class="th-content">钢种 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="钢种" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="sortable" data-col="类别">
+                            <span class="th-content">类别 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="类别" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-defect sortable" data-col="缺陷分析">
+                            <span class="th-content">缺陷分析 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="缺陷分析" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-action">查看</th>
+                    </tr>
+                </thead>
+                <tbody id="record-tbody">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <!-- 筛选弹窗 (必须在 app.js 之前, 否则 addEventListener 走不到按钮) -->
+    <div class="modal" id="filter-modal">
+        <div class="modal-content filter-modal-content">
+            <div class="filter-modal-header">
+                <h3 id="filter-modal-title">筛选</h3>
+                <div class="filter-modal-toolbar">
+                    <button type="button" class="btn-link" id="filter-select-all">全选</button>
+                    <button type="button" class="btn-link" id="filter-invert">反选</button>
+                </div>
+                <button type="button" class="modal-close" onclick="closeFilterModal()">×</button>
+            </div>
+            <div class="filter-modal-body" id="filter-modal-body">
+                <!-- 动态渲染每列 distinct 值 -->
+            </div>
+            <div class="filter-modal-footer">
+                <span class="filter-summary" id="filter-summary"></span>
+                <button type="button" class="btn-link" id="filter-clear-col" title="清除本列筛选">清除本列</button>
+                <button type="button" class="btn-secondary" onclick="closeFilterModal()">取消</button>
+                <button type="button" class="btn-primary" id="filter-apply-btn">应用筛选</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

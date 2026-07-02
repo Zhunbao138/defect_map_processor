@@ -1,0 +1,524 @@
+"""Flask Web 应用。
+
+提供以下路由:
+- GET  /                          主页 (前端展示)
+- POST /api/upload                上传并处理 Excel 文件
+- POST /api/process               处理本地文件
+- GET  /api/records               获取所有缺陷记录 (JSON)
+- GET  /api/records/<row_index>   获取单条记录
+- GET  /api/progress/<task_id>    获取处理进度
+- GET  /api/image/<path:filepath> 提供图片访问
+
+使用:
+    python cli.py serve
+    python cli.py serve --port 8080 --debug
+"""
+from __future__ import annotations
+
+import json
+import os
+import queue
+import threading
+import time
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from flask import (
+    Flask,
+    Response,
+    abort,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+)
+
+from core.pipeline import run_pipeline, ProcessPipeline, ProcessConfig
+
+import os
+from functools import wraps
+
+
+# 全局任务状态
+TASKS: dict[str, dict] = {}
+TASK_LOCK = threading.Lock()
+
+# 项目根目录
+PROJECT_ROOT = Path(__file__).parent
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output"
+
+
+
+# ============= HTTP Basic Auth =============
+import base64
+import secrets as _secrets
+from pathlib import Path as _Path
+
+def _load_credentials():
+    user = os.environ.get("ADMIN_USER", "admin")
+    pwd = os.environ.get("ADMIN_PASSWORD")
+    if not pwd:
+        for auth_file in [_Path(__file__).parent / ".auth", _Path("/home/ubuntu/.defect_auth")]:
+            if auth_file.exists():
+                try:
+                    content = auth_file.read_text(encoding="utf-8-sig").strip()
+                    if ":" in content:
+                        u, p = content.split(":", 1)
+                        user = u.strip()
+                        pwd = p.strip()
+                        break
+                except Exception:
+                    pass
+    if not pwd:
+        raise RuntimeError("ADMIN_PASSWORD not set, use env var or .auth file")
+    return user, pwd
+
+_AUTH_USER, _AUTH_PASS = _load_credentials()
+
+def _check_auth(auth_header):
+    if not auth_header:
+        return False
+    try:
+        scheme, credentials = auth_header.split(" ", 1)
+        if scheme.lower() != "basic":
+            return False
+        decoded = base64.b64decode(credentials).decode("utf-8", errors="ignore")
+        if ":" not in decoded:
+            return False
+        u, p = decoded.split(":", 1)
+        return _secrets.compare_digest(u, _AUTH_USER) and _secrets.compare_digest(p, _AUTH_PASS)
+    except Exception:
+        return False
+
+def _unauthorized():
+    return Response(
+        "<!doctype html><html><head><meta charset=utf-8>" +
+        "<title>需要登录 - 钢材缺陷图像知识库</title>" +
+        "<style>body{font-family:sans-serif;display:flex;align-items:center;" +
+        "justify-content:center;height:100vh;margin:0;background:#1a202c;color:#fff;}" +
+        ".box{text-align:center;padding:2rem;}" +
+        "h1{margin:0 0 1rem;font-size:1.5rem;}" +
+        "p{opacity:0.7;}</style></head><body>" +
+        "<div class=box><h1>钢材缺陷图像知识库 - 需要登录</h1>" +
+        "<p>Please use account and password (browser will prompt)</p></div></body></html>",
+        status=401,
+        headers={"WWW-Authenticate": "Basic realm=Steel-Defect-Knowledge-Base"}
+    )
+
+def auth_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.path == "/api/health":
+            return f(*args, **kwargs)
+        if not _check_auth(request.headers.get("Authorization")):
+            return _unauthorized()
+        return f(*args, **kwargs)
+    return decorated
+
+# ============= /HTTP Basic Auth =============
+
+
+def create_app() -> Flask:
+    """创建 Flask 应用。"""
+    app = Flask(
+        __name__,
+        template_folder=str(PROJECT_ROOT / "templates"),
+        static_folder=str(PROJECT_ROOT / "static"),
+    )
+    app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200MB 上限
+
+    register_routes(app)
+    return app
+
+
+def register_routes(app: Flask):
+    """注册路由。"""
+
+    @app.route("/")
+    @auth_required
+    def index():
+        """主页。"""
+        return render_template("index.html")
+
+    @app.route("/api/upload", methods=["POST"])
+    @auth_required
+    def api_upload():
+        """上传并处理 Excel 文件。"""
+        if "file" not in request.files:
+            return jsonify({"error": "未提供文件"}), 400
+
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "文件名为空"}), 400
+
+        # 检查扩展名 - 只支持 .xlsx
+        ext = Path(file.filename).suffix.lower()
+        if ext == ".xls":
+            return jsonify({
+                "error": "不支持 .xls 格式! 请先用 WPS/Excel 打开并另存为 .xlsx 后再上传。"
+            }), 400
+        if ext != ".xlsx":
+            return jsonify({"error": f"不支持的格式: {ext}, 仅支持 .xlsx"}), 400
+
+        # 保存到 input 目录
+        input_dir = PROJECT_ROOT / "input"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = Path(file.filename).stem
+        saved_path = input_dir / f"{safe_name}_{timestamp}{ext}"
+        file.save(str(saved_path))
+
+        # 创建任务
+        task_id = str(uuid.uuid4())[:8]
+        output_dir = DEFAULT_OUTPUT_DIR / task_id
+        with TASK_LOCK:
+            TASKS[task_id] = {
+                "status": "pending",
+                "progress": 0.0,
+                "stage": "init",
+                "message": "等待处理...",
+                "file": str(saved_path),
+                "output_dir": str(output_dir),
+                "created_at": time.time(),
+            }
+
+        # 后台线程处理
+        enable_ocr = request.form.get("enable_ocr", "true").lower() == "true"
+        enable_split = request.form.get("enable_split", "true").lower() == "true"
+        use_gpu = request.form.get("ocr_gpu", "false").lower() == "true"
+
+        thread = threading.Thread(
+            target=run_task,
+            args=(task_id, str(saved_path), str(output_dir), enable_ocr, enable_split, use_gpu),
+            daemon=True,
+        )
+        thread.start()
+
+        return jsonify({"task_id": task_id, "status": "processing"})
+
+    @app.route("/api/process", methods=["POST"])
+    @auth_required
+    def api_process():
+        """处理已存在的本地文件路径。"""
+        data = request.get_json()
+        file_path = data.get("file_path") if data else None
+        if not file_path:
+            return jsonify({"error": "未提供 file_path"}), 400
+
+        if not Path(file_path).exists():
+            return jsonify({"error": f"文件不存在: {file_path}"}), 404
+
+        # 检查扩展名 - 只支持 .xlsx
+        ext = Path(file_path).suffix.lower()
+        if ext == ".xls":
+            return jsonify({
+                "error": "不支持 .xls 格式! 请先用 WPS/Excel 打开并另存为 .xlsx 后再处理。"
+            }), 400
+        if ext != ".xlsx":
+            return jsonify({"error": f"不支持的格式: {ext}, 仅支持 .xlsx"}), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        output_dir = DEFAULT_OUTPUT_DIR / task_id
+        with TASK_LOCK:
+            TASKS[task_id] = {
+                "status": "pending",
+                "progress": 0.0,
+                "stage": "init",
+                "message": "等待处理...",
+                "file": file_path,
+                "output_dir": str(output_dir),
+                "created_at": time.time(),
+            }
+
+        enable_ocr = data.get("enable_ocr", True)
+        enable_split = data.get("enable_split", True)
+        use_gpu = data.get("ocr_gpu", True)  # 默认开 GPU
+
+        thread = threading.Thread(
+            target=run_task,
+            args=(task_id, file_path, str(output_dir), enable_ocr, enable_split, use_gpu),
+            daemon=True,
+        )
+        thread.start()
+
+        return jsonify({"task_id": task_id, "status": "processing"})
+
+    @app.route("/api/progress/<task_id>")
+    @auth_required
+    def api_progress(task_id: str):
+        """查询任务进度。"""
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+            if not task:
+                return jsonify({"error": "任务不存在"}), 404
+            return jsonify(task)
+
+    @app.route("/api/records/<task_id>")
+    @auth_required
+    def api_records(task_id: str):
+        """获取任务的缺陷记录。"""
+        # 1. 内存中
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+
+        if task:
+            output_dir = Path(task["output_dir"])
+            status = task["status"]
+        else:
+            # 2. 磁盘上
+            output_dir = DEFAULT_OUTPUT_DIR / task_id
+            if not output_dir.exists():
+                return jsonify({"error": "任务不存在"}), 404
+            status = "completed"
+
+        json_path = output_dir / "defect_records.json"
+        if not json_path.exists():
+            return jsonify({"error": "记录尚未生成", "status": status}), 404
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            records = json.load(f)
+
+        return jsonify(
+            {
+                "task_id": task_id,
+                "status": status,
+                "count": len(records),
+                "records": records,
+            }
+        )
+
+    @app.route("/api/image/<task_id>/<path:filepath>")
+    @auth_required
+    def api_image(task_id: str, filepath: str):
+        """提供图片访问。"""
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+        if task:
+            output_dir = Path(task["output_dir"])
+        else:
+            output_dir = DEFAULT_OUTPUT_DIR / task_id
+            if not output_dir.exists():
+                abort(404)
+
+        # 安全检查：防止路径穿越
+        try:
+            img_path = (output_dir / filepath).resolve()
+            output_dir_resolved = output_dir.resolve()
+            if not str(img_path).startswith(str(output_dir_resolved)):
+                abort(403)
+            if not img_path.exists():
+                abort(404)
+            return send_from_directory(str(img_path.parent), img_path.name)
+        except Exception:
+            abort(404)
+
+    @app.route("/api/list")
+    @auth_required
+    def api_list():
+        """列出所有任务。
+
+        数据源:
+        1. 内存中的 TASKS dict (本次进程内的任务, 含实时进度)
+        2. 磁盘 output/<task_id>/defect_records.json (历史任务, 重启后仍可见)
+        """
+        tasks = []
+        seen = set()
+
+        # 1. 内存中的活跃任务
+        with TASK_LOCK:
+            for tid, t in TASKS.items():
+                tasks.append(
+                    {
+                        "task_id": tid,
+                        "status": t["status"],
+                        "stage": t.get("stage", ""),
+                        "progress": t.get("progress", 0),
+                        "file": Path(t["file"]).name if t.get("file") else "",
+                        "created_at": t.get("created_at", 0),
+                        "source": "memory",
+                    }
+                )
+                seen.add(tid)
+
+        # 2. 磁盘上的历史任务
+        for task_dir in DEFAULT_OUTPUT_DIR.iterdir():
+            if not task_dir.is_dir():
+                continue
+            tid = task_dir.name
+            if tid in seen:
+                continue
+            json_path = task_dir / "defect_records.json"
+            if not json_path.exists():
+                continue
+            # 读取元数据
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+                count = len(records)
+            except Exception:
+                count = 0
+            # 从数据库查文件名 (按 output_dir 匹配 tasks 表)
+            file_name = ""
+            try:
+                import sqlite3
+                db_path = PROJECT_ROOT / "data" / "defect_map.db"
+                with sqlite3.connect(str(db_path)) as conn:
+                    row = conn.execute(
+                        """SELECT f.filename FROM tasks t
+                           LEFT JOIN files f ON f.id = t.file_id
+                           WHERE t.output_dir = ?
+                           LIMIT 1""",
+                        (str(task_dir),),
+                    ).fetchone()
+                    if row and row[0]:
+                        file_name = row[0]
+            except Exception:
+                pass
+            if not file_name:
+                # 回退: 用 task_dir 名 + 记录数
+                file_name = f"任务 {tid} ({count} 条)"
+
+            # 创建时间 = 目录 mtime
+            created_at = task_dir.stat().st_mtime
+            tasks.append(
+                {
+                    "task_id": tid,
+                    "status": "completed",
+                    "stage": "database",
+                    "progress": 1.0,
+                    "file": file_name,
+                    "created_at": created_at,
+                    "count": count,
+                    "source": "disk",
+                }
+            )
+
+        tasks.sort(key=lambda x: x["created_at"], reverse=True)
+        return jsonify({"tasks": tasks})
+
+    @app.route("/api/records/<task_id>/<int:row_index>", methods=["POST", "PUT"])
+    @auth_required
+    def api_update_record(task_id: str, row_index: int):
+        """更新某条记录的缺陷数据 (用户手动编辑)。"""
+        # 找输出目录
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+        if task:
+            output_dir = Path(task["output_dir"])
+        else:
+            output_dir = DEFAULT_OUTPUT_DIR / task_id
+        if not output_dir.exists():
+            return jsonify({"error": "任务不存在"}), 404
+
+        json_path = output_dir / "defect_records.json"
+        if not json_path.exists():
+            return jsonify({"error": "记录尚未生成"}), 404
+
+        # 读现有数据
+        with open(json_path, "r", encoding="utf-8") as f:
+            records = json.load(f)
+
+        # 找 row
+        target = None
+        for r in records:
+            if r.get("row_index") == row_index:
+                target = r
+                break
+        if target is None:
+            return jsonify({"error": f"未找到 row_index={row_index}"}), 404
+
+        # 取 POST body
+        data = request.get_json() or {}
+        defects = data.get("缺陷数据", {})
+        if not isinstance(defects, dict):
+            return jsonify({"error": "缺陷数据必须是对象"}), 400
+
+        # 更新该 row 的 缺陷数据
+        target["缺陷数据"] = defects
+
+        # 写回
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+
+        # 重新生成 Excel, 让编辑反映到下载的 excel
+        try:
+            from core.data_merger import DataMerger
+            merger = DataMerger(output_dir)
+            merger.save_excel(records)
+        except Exception as e:
+            # Excel 生成失败不阻塞保存
+            print(f"重新生成 Excel 失败: {e}")
+
+        return jsonify({
+            "success": True,
+            "row_index": row_index,
+            "缺陷数据": defects,
+        })
+
+    @app.route("/api/health")
+    @auth_required
+    def api_health():
+        """健康检查。"""
+        return jsonify({"status": "ok", "time": datetime.now().isoformat()})
+
+
+def run_task(
+    task_id: str,
+    file_path: str,
+    output_dir: str,
+    enable_ocr: bool,
+    enable_split: bool,
+    use_gpu: bool,
+):
+    """后台执行处理任务。"""
+
+    def progress(stage, percent, message):
+        with TASK_LOCK:
+            if task_id in TASKS:
+                TASKS[task_id].update(
+                    {
+                        "stage": stage,
+                        "progress": percent,
+                        "message": message,
+                        "status": "processing",
+                    }
+                )
+
+    config = ProcessConfig(
+        file_path=file_path,
+        output_dir=output_dir,
+        enable_ocr=enable_ocr,
+        enable_split=enable_split,
+        ocr_gpu=use_gpu,
+    )
+    pipeline = ProcessPipeline(config)
+    result = pipeline.run(progress_callback=progress)
+
+    with TASK_LOCK:
+        if task_id in TASKS:
+            TASKS[task_id].update(
+                {
+                    "status": "completed" if result.success else "failed",
+                    "progress": 1.0,
+                    "message": (
+                        "处理完成"
+                        if result.success
+                        else f"失败: {result.error}"
+                    ),
+                    "stats": result.stats,
+                    "json_path": result.json_path,
+                    "excel_path": result.excel_path,
+                }
+            )
+
+
+# ============================================================================
+# 入口
+# ============================================================================
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=False)
