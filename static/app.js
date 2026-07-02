@@ -195,9 +195,64 @@ function getDisplayedRecords() {
 }
 
 function renderPagination(displayedCount) {
-    // TODO(pagination): real implementation in next task
     const bar = document.getElementById('pagination-bar');
-    if (bar) bar.innerHTML = '';
+    if (!bar) return;
+
+    // 边界: 0 条 → 隐藏整个分页器
+    if (displayedCount === 0) {
+        bar.innerHTML = '';
+        bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = '';
+
+    const totalPages = Math.max(1, Math.ceil(displayedCount / paginationState.pageSize));
+    // 防御性钳制: 渲染时也再钳一次, 万一外部代码忘了
+    if (paginationState.page < 1) paginationState.page = 1;
+    if (paginationState.page > totalPages) paginationState.page = totalPages;
+
+    const isFirst = paginationState.page <= 1;
+    const isLast = paginationState.page >= totalPages;
+
+    bar.innerHTML = `
+        <button type="button" class="btn-secondary page-btn" id="page-prev" ${isFirst ? 'disabled' : ''}>« 上一页</button>
+        <span class="page-indicator">第 <span class="page-current">${paginationState.page}</span> / ${totalPages} 页</span>
+        <button type="button" class="btn-secondary page-btn" id="page-next" ${isLast ? 'disabled' : ''}>下一页 »</button>
+        <label class="page-size-label">
+            每页
+            <select class="page-size-select" id="page-size-select">
+                <option value="10" ${paginationState.pageSize === 10 ? 'selected' : ''}>10</option>
+                <option value="20" ${paginationState.pageSize === 20 ? 'selected' : ''}>20</option>
+                <option value="50" ${paginationState.pageSize === 50 ? 'selected' : ''}>50</option>
+                <option value="100" ${paginationState.pageSize === 100 ? 'selected' : ''}>100</option>
+            </select>
+            条
+        </label>
+    `;
+
+    // 翻页按钮
+    document.getElementById('page-prev')?.addEventListener('click', () => {
+        if (paginationState.page > 1) {
+            paginationState.page -= 1;
+            renderRecords();
+        }
+    });
+    document.getElementById('page-next')?.addEventListener('click', () => {
+        if (paginationState.page < totalPages) {
+            paginationState.page += 1;
+            renderRecords();
+        }
+    });
+
+    // pageSize 变化
+    document.getElementById('page-size-select')?.addEventListener('change', (e) => {
+        const newSize = parseInt(e.target.value, 10);
+        if ([10, 20, 50, 100].includes(newSize)) {
+            paginationState.pageSize = newSize;
+            paginationState.page = 1;   // 改 pageSize 必须重置到第 1 页
+            renderRecords();
+        }
+    });
 }
 
 function getPagedRecords(records) {
