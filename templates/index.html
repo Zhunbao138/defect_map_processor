@@ -11,16 +11,14 @@
         <h1>🔬 钢材缺陷图像知识库</h1>
         <p class="subtitle">导入 → 提取 → 切分 → OCR → 整合 → 展示</p>
 
-        <!-- 顶栏: 上传按钮 + 任务列表 -->
+        <!-- 顶栏: 上传按钮 + 任务下拉 -->
         <div class="app-bar">
             <button type="button" class="app-bar-btn" id="open-upload-btn">
                 📁 上传 Excel 文件
             </button>
-            <div class="app-bar-tasks" id="app-bar-tasks">
-                <div id="task-list" class="task-list-inline">
-                    <p class="empty-inline">暂无任务</p>
-                </div>
-            </div>
+            <select id="task-list" class="task-list-inline">
+                <option value="">暂无任务</option>
+            </select>
         </div>
     </header>
 

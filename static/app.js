@@ -734,37 +734,40 @@ async function saveEditParams(e) {
     }
 }
 
-// ===== 任务列表 =====
+// ===== 任务下拉 =====
 async function refreshTaskList() {
     try {
         const res = await fetch('/api/list');
         const data = await res.json();
-        const list = document.getElementById('task-list') || document.getElementById('app-bar-tasks');
+        const select = document.getElementById('task-list');
+        if (!select) return;
+
         if (!data.tasks.length) {
-            list.innerHTML = '<p class="empty">暂无任务</p>';
+            select.innerHTML = '<option value="">暂无任务</option>';
             return;
         }
-        list.innerHTML = data.tasks.map(t => {
-            const stage = t.stage ? ' · ' + t.stage : '';
-            const prog = t.status === 'processing' ? ' ' + Math.round((t.progress||0)*100) + '%' : '';
+
+        // 渲染 <option> 列表, label 里塞状态 + 进度
+        select.innerHTML = data.tasks.map(t => {
+            const prog = t.status === 'processing' ? ' · ' + Math.round((t.progress||0)*100) + '%' : '';
             const count = t.count != null ? ' · ' + t.count + ' 条' : '';
-            return `
-            <div class="task-item ${t.task_id === currentTaskId ? 'active' : ''}"
-                 onclick="selectTask('${t.task_id}')">
-                <div class="task-name">${escapeHtml(t.file)}</div>
-                <div class="task-status ${t.status}">
-                    ${t.status === 'completed' ? '✓ 已完成' :
-                      t.status === 'failed' ? '✗ 失败' :
-                      t.status === 'processing' ? '⏳' + prog + stage :
-                      '⏸ 等待中'}
-                    ${count}
-                </div>
-            </div>
-        `;}).join('');
+            const statusLabel = t.status === 'completed' ? '✓ 已完成'
+                              : t.status === 'failed' ? '✗ 失败'
+                              : t.status === 'processing' ? '⏳ 处理中' + prog
+                              : '⏸ 等待中';
+            const file = (t.file || '').split('/').pop();   // 只显示文件名, 不显示完整路径
+            return `<option value="${t.task_id}">${escapeHtml(statusLabel + count + ' — ' + file)}</option>`;
+        }).join('');
+
+        // 保持当前选中状态
+        if (currentTaskId && data.tasks.some(t => t.task_id === currentTaskId)) {
+            select.value = currentTaskId;
+        }
 
         // 默认选中第一个已完成任务, 自动加载其记录
         if (!currentTaskId && data.tasks.length > 0) {
             const first = data.tasks.find(t => t.status === 'completed') || data.tasks[0];
+            select.value = first.task_id;
             selectTask(first.task_id);
         }
     } catch (e) {
@@ -773,12 +776,11 @@ async function refreshTaskList() {
 }
 
 async function selectTask(taskId) {
+    if (!taskId) return;
     currentTaskId = taskId;
-    document.querySelectorAll('.task-item').forEach(el => el.classList.remove('active'));
-    const items = document.querySelectorAll('.task-item');
-    items.forEach(el => {
-        if (el.textContent.includes(taskId)) el.classList.add('active');
-    });
+    // 同步下拉的选中状态 (如果调用方还没设)
+    const select = document.getElementById('task-list');
+    if (select && select.value !== taskId) select.value = taskId;
 
     // 加载该任务的记录
     try {
@@ -794,6 +796,11 @@ async function selectTask(taskId) {
         console.error('Select task error:', e);
     }
 }
+
+// 任务下拉的 change 事件 (用户直接换 task 时)
+document.getElementById('task-list')?.addEventListener('change', (e) => {
+    selectTask(e.target.value);
+});
 
 // ===== 下载 (按当前 filter+sort) =====
 // JSON 导出 (前端生成): 文本 + OCR 参数 + warnings

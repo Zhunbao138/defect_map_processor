@@ -635,12 +635,13 @@ main {
 /* ===== 顶栏按钮 ===== */
 .app-bar {
     margin-top: 1rem;
+    max-width: 1200px;       /* 与 main 区的 result-section 同宽 */
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0 1.5rem;
     display: flex;
-    justify-content: center;
-    align-items: stretch;
+    align-items: center;
     gap: 0.75rem;
-    flex-wrap: wrap;
-    padding: 0 1rem;
 }
 
 .app-bar-tasks {
@@ -655,53 +656,38 @@ main {
 }
 
 .task-list-inline {
+    /* 下拉式任务选择器, 跟 .app-bar 同宽, 半透明背景匹配紫色 header */
     flex: 1;
-    max-height: 80px;
-    overflow-y: auto;
-}
-
-.task-list-inline .empty-inline {
-    color: rgba(255, 255, 255, 0.7);
-    text-align: center;
-    margin: 0;
-    font-size: 0.9rem;
-}
-
-.task-list-inline .task-item {
-    padding: 0.4rem 0.6rem;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 6px;
-    margin-bottom: 0.3rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.task-list-inline .task-item:hover {
-    background: rgba(255, 255, 255, 0.25);
-    border-color: rgba(255, 255, 255, 0.5);
-}
-
-.task-list-inline .task-item.active {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: white;
-}
-
-.task-list-inline .task-name {
-    font-weight: 600;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.18);
     color: white;
-    font-size: 0.85rem;
-    margin-bottom: 0.15rem;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.9rem;
+    font-family: inherit;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 14px 14px;
+    padding-right: 2.25rem;
 }
 
-.task-list-inline .task-status {
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.85);
+.task-list-inline:focus {
+    outline: none;
+    border-color: white;
+    background-color: rgba(255, 255, 255, 0.28);
 }
 
-.task-list-inline .task-status.completed { color: #9ae6b4; }
-.task-list-inline .task-status.failed { color: #feb2b2; }
-.task-list-inline .task-status.processing { color: #bee3f8; }
+/* 让浏览器原生 <option> 也有合理的可读性 (Chromium 自带深色风格在某些主题下会糊) */
+.task-list-inline option {
+    color: #1a202c;
+    background: white;
+}
 
 .app-bar-btn {
     padding: 0.6rem 1.4rem;
