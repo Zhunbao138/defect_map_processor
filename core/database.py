@@ -134,6 +134,25 @@ class Database:
                     warnings TEXT,
                     confidence REAL
                 );
+
+                -- cscan (中厚板卷厂) 文档记录
+                CREATE TABLE IF NOT EXISTS cscan_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    row_index INTEGER NOT NULL,
+                    "序号" TEXT, "生产厂" TEXT, "钢板号" TEXT, "钢种" TEXT,
+                    "类别" TEXT, "缺陷分析" TEXT,
+                    F_table TEXT, F_ascan TEXT, F_cscan TEXT, F_board TEXT,
+                    G_table TEXT, G_ascan TEXT, G_cscan TEXT, G_board TEXT,
+                    缺陷表格 TEXT,
+                    "板号" TEXT, "探伤代号" TEXT, "钢种OCR" TEXT, "生产日期" TEXT,
+                    "检测日期" TEXT, "标准号" TEXT,
+                    "厚度" REAL, "长度" REAL, "宽度" REAL,
+                    warnings TEXT,
+                    created_at REAL,
+                    UNIQUE(task_id, row_index)
+                );
+                CREATE INDEX IF NOT EXISTS idx_cscan_records_task ON cscan_records(task_id);
             """)
 
     # ===== 文件 =====
