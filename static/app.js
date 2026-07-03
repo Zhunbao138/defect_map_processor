@@ -554,6 +554,17 @@ function closeFilterModal() {
 
 function applyFilterModal() {
     console.log('[filter] apply clicked, currentCol=', currentFilterCol);
+    // 决定是 cscan 还是 zhongban: 看 cscanFilterState 是否有这个列
+    if (currentFilterCol && cscanFilterState[currentFilterCol]) {
+        document.querySelectorAll('#filter-modal-body input[type=checkbox]').forEach(cb => {
+            const col = cb.dataset.col, val = cb.dataset.val;
+            if (cb.checked) cscanFilterState[col].excluded.delete(val);
+            else cscanFilterState[col].excluded.add(val);
+        });
+        closeFilterModal();
+        renderCscanRecords();
+        return;
+    }
     document.querySelectorAll('#filter-modal-body input[type=checkbox]').forEach(cb => {
         const col = cb.dataset.col;
         const val = cb.dataset.val;
