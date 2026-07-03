@@ -541,10 +541,10 @@ function buildCscanDetailHTML(rec) {
     }
     // 8 张子图: F table/ascan/cscan/board + G table/ascan/cscan/board
     const imgsF = [
-        {key:'F_table', label:'F表格'}, {key:'F_ascan', label:'F-A扫'}, {key:'F_cscan', label:'F-C扫'}, {key:'F_board', label:'F板信息'}
+        {key:'F_table', label:'F表格'}, {key:'F_ascan', label:'F-A扫'}, {key:'F_cscan', label:'F-C扫'}
     ].map(k => cellImg(ci(k.key), k.label)).join('');
     const imgsG = [
-        {key:'G_table', label:'G表格'}, {key:'G_ascan', label:'G-A扫'}, {key:'G_cscan', label:'G-C扫'}, {key:'G_board', label:'G板信息'}
+        {key:'G_table', label:'G表格'}, {key:'G_ascan', label:'G-A扫'}, {key:'G_cscan', label:'G-C扫'}
     ].map(k => cellImg(ci(k.key), k.label)).join('');
 
     // 13 列缺陷表格
