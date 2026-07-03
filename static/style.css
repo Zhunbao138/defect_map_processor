@@ -766,38 +766,23 @@ body.cscan-mode #zhongban-only-3 { display: none; }
     margin-top: 1.25rem;
 }
 
-/* ===== 缺陷记录表格 ===== */
+/* ===== 缺陷记录表格 (zhongban + cscan 共用) ===== */
 .record-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.9rem;
-    table-layout: fixed;
+    table-layout: auto;   /* 让缩略图列自适应宽度 */
 }
-
-.record-table .col-index {
-    width: 75px;
-    text-align: left;
-    white-space: nowrap;
-    padding: 0.75rem 0.5rem 0.75rem 0.6rem;
-}
-.record-table .col-factory { width: 110px; white-space: nowrap; }
-.record-table .col-plate { width: 170px; }
-.record-table .col-grade { width: 220px; white-space: nowrap; }
-.record-table .col-category { width: 100px; white-space: nowrap; }
-.record-table .col-defect { width: auto; }
-
-.record-table thead th {
-    text-align: left;
-    padding: 0.75rem 0.5rem;
-    background: #f7fafc;
-    color: #4a5568;
-    font-weight: 600;
-    border-bottom: 2px solid #e2e8f0;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    white-space: nowrap;
-}
+.record-table .col-index { width: 60px; }
+.record-table .col-plate { width: 160px; }
+.record-table .col-grade { width: 200px; }
+.record-table .col-thumb { width: 90px; }
+.record-table .col-thumb img { width: 64px; height: 48px; object-fit: cover; border-radius: 3px; background:#edf2f7; }
+.record-table .col-category { width: 110px; }
+.record-table .col-defect { min-width: 120px; }
+.record-table .col-meta { width: 110px; color:#4a5568; font-size: 0.85rem; }
+.record-table .col-action { width: 80px; text-align: center; }
+.record-table .btn-sm { padding: 0.2rem 0.7rem; font-size: 0.82rem; border-radius: 6px; }
 .record-table thead th .th-content,
 .record-table thead th .sort-arrow,
 .record-table thead th .th-filter-btn {
@@ -1201,6 +1186,37 @@ body.cscan-mode #zhongban-only-3 { display: none; }
 }
 .cscan-section .record-table th { color: #4a5568; }
 .cscan-section .record-table td { vertical-align: middle; }
+
+/* ===== 摘要卡 (zhongban + cscan 共用) ===== */
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin: 1rem 0 1.5rem;
+}
+.summary-card {
+    background: linear-gradient(135deg, #f7fafc, #edf2f7);
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    text-align: center;
+}
+.summary-card .sc-label {
+    font-size: 0.82rem;
+    color: #718096;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.3px;
+}
+.summary-card .sc-value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: #2b6cb0;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 700px) {
+    .summary-cards { grid-template-columns: repeat(2, 1fr); }
+}
 
 /* cscan 详情: 8 张子图网格 (F×4 + G×4 = 2 行 × 4 列) */
 .cscan-images-grid {
