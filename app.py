@@ -134,10 +134,11 @@ def _load_cscan_from_db(conn, task_id: str) -> list[dict]:
     results = []
     for row in rows:
         d = dict(zip(cols, row))
-        try:
-            d["缺陷表格"] = _json.loads(d.get("缺陷表格") or "[]")
-        except Exception:
-            d["缺陷表格"] = []
+        for fld in ("缺陷表格_F", "缺陷表格_G"):
+            try:
+                d[fld] = _json.loads(d.get(fld) or "[]")
+            except Exception:
+                d[fld] = []
         try:
             d["warnings"] = _json.loads(d.get("warnings") or "[]")
         except Exception:

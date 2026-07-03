@@ -22,7 +22,7 @@ CSCAN_RECORD_FIELDS = (
     "F_table", "F_ascan", "F_cscan",
     "G_table", "G_ascan", "G_cscan",
     # OCR 字段
-    "缺陷表格",       # list[dict], 13 列每行
+    "缺陷表格_F", "缺陷表格_G",   # list[dict], 13 列每行
     "板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
     "标准号", "厚度", "长度", "宽度", "warnings",
 )
@@ -258,7 +258,7 @@ def ensure_cscan_table(conn: sqlite3.Connection) -> None:
             "类别" TEXT, "缺陷分析" TEXT,
             F_table TEXT, F_ascan TEXT, F_cscan TEXT,
             G_table TEXT, G_ascan TEXT, G_cscan TEXT,
-            缺陷表格 TEXT,
+            缺陷表格_F TEXT, 缺陷表格_G TEXT,
             "板号" TEXT, "探伤代号" TEXT, "钢种OCR" TEXT, "生产日期" TEXT,
             "检测日期" TEXT, "标准号" TEXT, "厚度" REAL, "长度" REAL, "宽度" REAL,
             warnings TEXT,
@@ -276,26 +276,26 @@ def save_to_db(conn: sqlite3.Connection, task_id: str, records: list[dict[str, A
     now = time.time()
     count = 0
     for r in records:
-        # 缺陷表格 序列化为 JSON 字符串
-        defect_table_json = json.dumps(r.get("缺陷表格") or [], ensure_ascii=False)
+        # 缺陷表格 F/G 分别序列化为 JSON
+        defect_table_f_json = json.dumps(r.get("缺陷表格_F") or [], ensure_ascii=False)
+        defect_table_g_json = json.dumps(r.get("缺陷表格_G") or [], ensure_ascii=False)
         warnings_json = json.dumps(r.get("warnings") or [], ensure_ascii=False)
-        # row_index 1-based (前端展示用)
         row_1based = r.get("row_index", 0)
         conn.execute("""
             INSERT OR REPLACE INTO cscan_records
             (task_id, row_index, "序号", "生产厂", "钢板号", "钢种", "类别", "缺陷分析",
              F_table, F_ascan, F_cscan,
              G_table, G_ascan, G_cscan,
-             缺陷表格, "板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
+             缺陷表格_F, 缺陷表格_G, "板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
              "标准号", "厚度", "长度", "宽度", warnings, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             task_id, row_1based,
             r.get("序号"), r.get("生产厂"), r.get("钢板号"), r.get("钢种"),
             r.get("类别"), r.get("缺陷分析"),
             r.get("F_table"), r.get("F_ascan"), r.get("F_cscan"),
             r.get("G_table"), r.get("G_ascan"), r.get("G_cscan"),
-            defect_table_json,
+            defect_table_f_json, defect_table_g_json,
             r.get("板号"), r.get("探伤代号"), r.get("钢种OCR"), r.get("生产日期"),
             r.get("检测日期"), r.get("标准号"),
             r.get("厚度"), r.get("长度"), r.get("宽度"),
@@ -318,10 +318,11 @@ def load_from_db(conn: sqlite3.Connection, task_id: str) -> list[dict[str, Any]]
     for row in rows:
         d = dict(zip(cols, row))
         # 反序列化 JSON
-        try:
-            d["缺陷表格"] = json.loads(d.get("缺陷表格") or "[]")
-        except Exception:
-            d["缺陷表格"] = []
+        for fld in ("缺陷表格_F", "缺陷表格_G"):
+            try:
+                d[fld] = json.loads(d.get(fld) or "[]")
+            except Exception:
+                d[fld] = []
         try:
             d["warnings"] = json.loads(d.get("warnings") or "[]")
         except Exception:
