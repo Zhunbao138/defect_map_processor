@@ -147,6 +147,43 @@
                 <!-- JS 渲染分页器 -->
             </div>
         </section>
+
+        <!-- ========== cscan 结果区 ========== -->
+        <section class="cscan-section" id="cscan-section" style="display:none">
+            <div class="result-header">
+                <h2>📡 中厚板卷厂 <span id="cscan-record-count">(0)</span></h2>
+                <div class="result-actions">
+                    <button class="btn-secondary" id="cscan-download-json">下载 JSON</button>
+                </div>
+            </div>
+
+            <table class="record-table" id="cscan-table">
+                <thead>
+                    <tr>
+                        <th>序号</th>
+                        <th>钢板号</th>
+                        <th>钢种</th>
+                        <th>类别</th>
+                        <th>厚度[mm]</th>
+                        <th>长度[mm]</th>
+                        <th>宽度[mm]</th>
+                        <th>缺陷表格行数</th>
+                        <th>详情</th>
+                    </tr>
+                </thead>
+                <tbody id="cscan-tbody">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+        </section>
+
+        <!-- ========== cscan 详情弹窗 ========== -->
+        <div class="modal" id="cscan-detail-modal">
+            <div class="modal-content" onclick="event.stopPropagation()">
+                <button type="button" class="modal-close" onclick="closeCscanDetail()">×</button>
+                <div id="cscan-detail-body"></div>
+            </div>
+        </div>
     </main>
 
     <!-- 筛选弹窗 (必须在 app.js 之前, 否则 addEventListener 走不到按钮) -->

@@ -1189,3 +1189,75 @@ body.cscan-mode #zhongban-only-3 { display: none; }
     outline: none;
     border-color: #667eea;
 }
+
+/* ===== cscan 结果区 ===== */
+.cscan-section {
+    background: white;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    margin: 1rem auto;
+    max-width: 1200px;
+}
+.cscan-section .record-table th { color: #4a5568; }
+.cscan-section .record-table td { vertical-align: middle; }
+
+/* cscan 详情: 8 张子图网格 (F×4 + G×4 = 2 行 × 4 列) */
+.cscan-images-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.cscan-images-grid .image-block {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: #f7fafc;
+}
+.cscan-images-grid .image-label {
+    font-size: 0.85rem;
+    color: #4a5568;
+    margin-bottom: 0.4rem;
+    font-weight: 600;
+}
+.cscan-images-grid img {
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    background: white;
+}
+.cscan-images-grid .row-divider {
+    grid-column: 1 / -1;
+    font-size: 0.95rem;
+    color: #2d3748;
+    font-weight: 600;
+    padding: 0.4rem 0;
+    border-top: 1px dashed #cbd5e0;
+    margin-top: 0.5rem;
+}
+
+/* 缺陷表格样式 (在详情里展示) */
+.cscan-defect-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+.cscan-defect-table th {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    padding: 0.4rem;
+    text-align: center;
+}
+.cscan-defect-table td {
+    padding: 0.35rem 0.4rem;
+    border-bottom: 1px solid #edf2f7;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.cscan-defect-table td:first-child { text-align: center; background: #f7fafc; }
+
+/* 详情弹窗稍宽 (容纳 8 张图) */
+#cscan-detail-modal .modal-content { max-width: 1100px; width: 95vw; }
+#cscan-detail-modal .modal-content { max-height: 90vh; overflow-y: auto; }

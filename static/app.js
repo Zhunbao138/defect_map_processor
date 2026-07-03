@@ -749,10 +749,13 @@ async function saveEditParams(e) {
 }
 
 // ===== 任务下拉 =====
+let taskListCache = [];   // 缓存最近拉到的 /api/list 列表
+
 async function refreshTaskList() {
     try {
         const res = await fetch('/api/list');
         const data = await res.json();
+        taskListCache = data.tasks || [];
         const select = document.getElementById('task-list');
         if (!select) return;
 
@@ -761,7 +764,7 @@ async function refreshTaskList() {
             return;
         }
 
-        // 渲染 <option> 列表, label 里塞状态 + 进度
+        // 渲染 <option> 列表, label 里塞状态 + 进度 + 类型前缀
         select.innerHTML = data.tasks.map(t => {
             const prog = t.status === 'processing' ? ' · ' + Math.round((t.progress||0)*100) + '%' : '';
             const count = t.count != null ? ' · ' + t.count + ' 条' : '';
@@ -769,8 +772,9 @@ async function refreshTaskList() {
                               : t.status === 'failed' ? '✗ 失败'
                               : t.status === 'processing' ? '⏳ 处理中' + prog
                               : '⏸ 等待中';
+            const typeTag = (t.task_type || 'zhongban') === 'cscan' ? '📡 ' : '';
             const file = (t.file || '').split('/').pop();   // 只显示文件名, 不显示完整路径
-            return `<option value="${t.task_id}">${escapeHtml(statusLabel + count + ' — ' + file)}</option>`;
+            return `<option value="${t.task_id}">${escapeHtml(typeTag + statusLabel + count + ' — ' + file)}</option>`;
         }).join('');
 
         // 保持当前选中状态
@@ -796,20 +800,152 @@ async function selectTask(taskId) {
     const select = document.getElementById('task-list');
     if (select && select.value !== taskId) select.value = taskId;
 
-    // 加载该任务的记录
-    try {
-        const res = await fetch(`/api/records/${taskId}`);
-        if (res.ok) {
-            const data = await res.json();
-            recordsCache = data.records;
-            paginationState.page = 1;   // 切换任务后回到第 1 页
-            renderRecords();
-            document.getElementById('result-section').style.display = 'block';
-        }
-    } catch (e) {
-        console.error('Select task error:', e);
+    // 查 task_type 决定走哪条加载链
+    const taskInfo = taskListCache.find(t => t.task_id === taskId);
+    const taskType = taskInfo?.task_type || 'zhongban';
+
+    document.getElementById('result-section').style.display = 'none';
+    const cscanSection = document.getElementById('cscan-section');
+    if (cscanSection) cscanSection.style.display = 'none';
+
+    if (taskType === 'cscan') {
+        loadCscanRecords(taskId);
+    } else {
+        loadRecords();
     }
 }
+
+async function loadCscanRecords(taskId) {
+    try {
+        const res = await fetch(`/api/cscan_records/${taskId}`);
+        if (!res.ok) {
+            console.warn('cscan_records not available for', taskId);
+            return;
+        }
+        const data = await res.json();
+        renderCscanRecords(data.records || []);
+        const sec = document.getElementById('cscan-section');
+        if (sec) sec.style.display = 'block';
+    } catch (e) {
+        console.error('Load cscan error:', e);
+    }
+}
+
+function renderCscanRecords(records) {
+    document.getElementById('cscan-record-count').textContent = `(${records.length})`;
+    const tbody = document.getElementById('cscan-tbody');
+    tbody.innerHTML = '';
+    records.forEach(rec => {
+        const tr = document.createElement('tr');
+        tr.dataset.row = rec.row_index;
+        const defectCount = (rec['缺陷表格'] || []).length;
+        tr.innerHTML = `
+            <td>${escapeHtml(rec['序号'] || '')}</td>
+            <td>${escapeHtml(rec['钢板号'] || '')}</td>
+            <td>${escapeHtml(rec['钢种'] || '')}</td>
+            <td>${escapeHtml(rec['类别'] || '')}</td>
+            <td>${rec['厚度'] ?? '-'}</td>
+            <td>${rec['长度'] ?? '-'}</td>
+            <td>${rec['宽度'] ?? '-'}</td>
+            <td>${defectCount}</td>
+            <td><button class="btn-secondary btn-sm" data-action="open">查看</button></td>
+        `;
+        tr.querySelector('button').addEventListener('click', () => openCscanDetail(rec));
+        tbody.appendChild(tr);
+    });
+}
+
+function openCscanDetail(rec) {
+    const modal = document.getElementById('cscan-detail-modal');
+    const body = document.getElementById('cscan-detail-body');
+
+    // 8 张子图
+    const imgBlocks = (['F', 'G']).flatMap(prefix => {
+        const order = [
+            ['table', '13 列缺陷表格'],
+            ['ascan', 'A 扫'],
+            ['cscan', 'C 扫'],
+            ['board', '板信息'],
+        ];
+        const header = `<div class="row-divider">${prefix} 列原图 (${prefix === 'F' ? '图-1' : '图-2'})</div>`;
+        const cells = order.map(([name, label]) => {
+            const path = rec[`${prefix}_${name}`];
+            const url = path ? `/api/image/${currentTaskId}/${relPath(path)}` : '';
+            return `
+                <div class="image-block">
+                    <div class="image-label">${label} (${prefix}_${name})</div>
+                    ${url ? `<a href="${escapeAttr(url)}" target="_blank"><img src="${escapeAttr(url)}" loading="lazy"></a>` : '<div style="color:#999;padding:2rem 0;text-align:center">无图</div>'}
+                </div>
+            `;
+        }).join('');
+        return header + cells;
+    }).join('');
+
+    // 缺陷表格
+    const defects = rec['缺陷表格'] || [];
+    const tableRows = defects.length === 0
+        ? '<tr><td colspan="13" style="text-align:center;color:#999">无 OCR 数据</td></tr>'
+        : defects.map(t => `
+            <tr>
+                <td>${t['序号'] ?? ''}</td>
+                <td>${t['X起始'] ?? ''}</td>
+                <td>${t['X终止'] ?? ''}</td>
+                <td>${t['X中点'] ?? ''}</td>
+                <td>${t['X长度'] ?? ''}</td>
+                <td>${t['Y起始'] ?? ''}</td>
+                <td>${t['Y终止'] ?? ''}</td>
+                <td>${t['Y中点'] ?? ''}</td>
+                <td>${t['Y长度'] ?? ''}</td>
+                <td>${t['面积'] ?? ''}</td>
+                <td>${t['类型'] ?? ''}</td>
+                <td>${t['深度'] ?? ''}</td>
+                <td>${t['幅值'] ?? ''}</td>
+            </tr>
+        `).join('');
+
+    body.innerHTML = `
+        <h3 style="margin:0 0 0.5rem 0;color:#2d3748">📡 序号 ${escapeHtml(rec['序号'] || '')} · ${escapeHtml(rec['钢板号'] || '')}</h3>
+        <div style="color:#4a5568;margin-bottom:1rem;font-size:0.9rem">
+            ${escapeHtml(rec['生产厂'] || '')} · ${escapeHtml(rec['钢种'] || '')} · ${escapeHtml(rec['类别'] || '')} · 缺陷: ${escapeHtml(rec['缺陷分析'] || '')}
+            <br>板号=${rec['板号'] ?? '-'} 厚度=${rec['厚度'] ?? '-'}mm 长度=${rec['长度'] ?? '-'}mm 宽度=${rec['宽度'] ?? '-'}mm
+        </div>
+
+        <div class="cscan-images-grid">
+            ${imgBlocks}
+        </div>
+
+        <h4 style="margin:1rem 0 0.4rem;color:#2d3748">📋 缺陷表格 (${defects.length} 行)</h4>
+        <div style="overflow-x:auto">
+        <table class="cscan-defect-table">
+            <thead>
+                <tr>
+                    <th>序号</th><th>X起始</th><th>X终止</th><th>X中点</th><th>X长度</th>
+                    <th>Y起始</th><th>Y终止</th><th>Y中点</th><th>Y长度</th>
+                    <th>面积</th><th>类型</th><th>深度</th><th>幅值</th>
+                </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+        </table>
+        </div>
+    `;
+    modal.classList.add('active');
+}
+
+function closeCscanDetail() {
+    const modal = document.getElementById('cscan-detail-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+// 点击 cscan-detail 背景关闭
+document.getElementById('cscan-detail-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'cscan-detail-modal') closeCscanDetail();
+});
+
+// cscan JSON 下载
+document.getElementById('cscan-download-json')?.addEventListener('click', () => {
+    if (!currentTaskId) return;
+    window.location.href = `/api/image/${currentTaskId}/cscan_records.json`;
+});
 
 // 任务下拉的 change 事件 (用户直接换 task 时)
 document.getElementById('task-list')?.addEventListener('change', (e) => {
