@@ -213,7 +213,19 @@ function getDisplayedRecords() {
 }
 
 function renderPagination(displayedCount) {
-    const bar = document.getElementById('pagination-bar');
+    // cscan 使用动态创建的 pagination bar, zhongban 用 #pagination-bar
+    const isCscan = currentTaskType === 'cscan';
+    const barId = isCscan ? 'cscan-pagination-bar' : 'pagination-bar';
+    let bar = document.getElementById(barId);
+    if (!bar && isCscan) {
+        const tbl = document.getElementById('cscan-table');
+        if (tbl) {
+            bar = document.createElement('div');
+            bar.id = barId;
+            bar.className = 'pagination-bar';
+            tbl.parentNode.insertBefore(bar, tbl.nextSibling);
+        }
+    }
     if (!bar) return;
 
     // 边界: 0 条 → 隐藏整个分页器
