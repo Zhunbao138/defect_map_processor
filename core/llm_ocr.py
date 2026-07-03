@@ -87,3 +87,71 @@ def llm_ocr_board_info(image_path: str | Path) -> dict[str, Any]:
         return {}
     except Exception:
         return {}
+
+
+# ============================================================
+# 模板一 (zhongban) LLM 接口 — 与 cscan_ocr 的 extract_defect_info 对齐
+# ============================================================
+def llm_extract_defect_info(image_path: str | Path) -> dict[str, Any]:
+    """用大模型从缺陷图谱中提取 6 项参数.
+
+    返回格式: {"钢板号": ..., "材料尺寸": ..., "缺陷中心X": ..., ..., "raw_text": ..., "params": {...}}
+    """
+    prompt = """你是工业检测数据提取助手。从缺陷图谱图片中提取以下数据:
+
+1. 钢板号: 14位数字
+2. 材料尺寸: 格式如 "12000×2430×30"
+3. 缺陷中心X (mm), 缺陷中心Y (mm)
+4. 缺陷长度 (mm), 缺陷宽度 (mm), 缺陷深度 (mm)
+
+请只返回一个 JSON 对象，用中文 key: "钢板号", "材料尺寸", "缺陷中心X", "缺陷中心Y", "缺陷长度", "缺陷宽度", "缺陷深度"。
+没有值的填 null。"""
+    try:
+        raw = _call_llm(prompt, image_path)
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            data = json.loads(m.group(0))
+            return {
+                "钢板号": data.get("钢板号") or "",
+                "材料尺寸": data.get("材料尺寸") or "",
+                "缺陷中心X": str(data.get("缺陷中心X") or ""),
+                "缺陷中心Y": str(data.get("缺陷中心Y") or ""),
+                "缺陷长度": str(data.get("缺陷长度") or ""),
+                "缺陷宽度": str(data.get("缺陷宽度") or ""),
+                "缺陷深度": str(data.get("缺陷深度") or ""),
+                "raw_text": [json.dumps(data, ensure_ascii=False)],
+                "full_text": json.dumps(data, ensure_ascii=False),
+                "params": {
+                    "钢板号": data.get("钢板号") or "",
+                    "材料尺寸": data.get("材料尺寸") or "",
+                    "缺陷中心X": str(data.get("缺陷中心X") or ""),
+                    "缺陷中心Y": str(data.get("缺陷中心Y") or ""),
+                    "缺陷长度": str(data.get("缺陷长度") or ""),
+                    "缺陷宽度": str(data.get("缺陷宽度") or ""),
+                    "缺陷深度": str(data.get("缺陷深度") or ""),
+                },
+                "warnings": [],
+            }
+        return {"error": "no JSON found", "raw_text": [], "params": {}, "warnings": ["LLM 返回格式错误"]}
+    except Exception as e:
+        return {"error": str(e), "raw_text": [], "params": {}, "warnings": [f"LLM 调用失败: {e}"]}
+
+
+def llm_extract_defect_info_batch(
+    image_paths: list[str | Path],
+    **kwargs,
+) -> list[dict]:
+    """批量 LLM 识别 (串行, 和 Tesseract 版接口一致)."""
+    results = []
+    total = len(image_paths)
+    on_progress = kwargs.get("on_progress")
+    for idx, p in enumerate(image_paths, 1):
+        try:
+            r = llm_extract_defect_info(p)
+            r["source"] = str(p)
+            results.append(r)
+        except Exception as e:
+            results.append({"source": str(p), "error": str(e), "raw_text": [], "params": {}, "warnings": [str(e)]})
+        if on_progress:
+            on_progress(idx, total)
+    return results

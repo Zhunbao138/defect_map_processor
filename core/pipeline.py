@@ -257,7 +257,12 @@ class ProcessPipeline:
                     report("ocr", done / total if total else 1.0,
                             f"OCR 识别中 {done}/{total} 张...")
 
-                all_results = extract_defect_info_batch(
+                if self.config.recognition == "llm":
+                    from .llm_ocr import llm_extract_defect_info_batch
+                    ocr_fn = llm_extract_defect_info_batch
+                else:
+                    ocr_fn = extract_defect_info_batch
+                all_results = ocr_fn(
                     all_paths,
                     languages=self.config.ocr_languages,
                     gpu=self.config.ocr_gpu,
