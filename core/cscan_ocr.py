@@ -263,7 +263,11 @@ BOARD_LABELS = {
 
 
 def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
-    """识别板信息 panel, 返回 {plate_no, test_code, grade, thickness, length, width, ...}."""
+    """识别板信息 panel, 返回 {plate_no, test_code, grade, thickness, length, width, ...}.
+
+    不预处理颜色 (直方图阈值会破坏字符), 只放大.
+    用模板字符串修复 OCR 错误的字符 ('1' vs 'l'/'I'/'|' 等).
+    """
     try:
         import pytesseract
         from PIL import Image
@@ -275,14 +279,13 @@ def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
         return {}
 
     img = Image.open(board_image_path)
-    # 放大提升 OCR 准确率
     w, h = img.size
-    if w < 600:
+    # 放大 3x 提升小字识别率
+    if w < 800:
         img = img.resize((w * 3, h * 3), Image.LANCZOS)
+    img = img.convert("L")
 
     try:
-        # psm=6 (assume single block) 把每行作为一个 block,
-        # 但每行的 token 都在 block_num=1, 用 top 区分行
         data = pytesseract.image_to_data(
             img, lang="chi_sim+eng",
             output_type=pytesseract.Output.DICT,
@@ -291,7 +294,6 @@ def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
     except Exception:
         return {}
 
-    # 收集所有 token
     items = []
     for i in range(len(data["text"])):
         text = str(data["text"][i]).strip()
@@ -301,7 +303,7 @@ def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
             conf = float(data["conf"][i])
         except (ValueError, TypeError):
             conf = -1
-        if conf < 30:
+        if conf < 25:
             continue
         items.append({
             "text": text,
@@ -312,7 +314,15 @@ def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
     if not items:
         return {}
 
-    # 按 top 分组 (同一行的 token top 接近, ±20px 合并)
+    import re as _re
+
+    LABEL_KEYS_CN = {
+        "板号": "plate_no", "探伤代号": "test_code", "钢种": "grade",
+        "生产日期": "prod_date", "检测日期": "test_date", "标准号": "standard",
+        "厚度": "thickness", "长度": "length", "宽度": "width",
+    }
+
+    # 按 top 分行 (±25 px)
     items.sort(key=lambda x: (x["top"], x["left"]))
     rows: list[list[dict]] = []
     for it in items:
@@ -320,38 +330,61 @@ def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
             rows[-1].append(it)
         else:
             rows.append([it])
-    # 每行内按 left 排序
     for r in rows:
         r.sort(key=lambda x: x["left"])
 
-    # 按 left 排序每行
+    # 在每行内按 left 排序.
+    # 策略: 先识别 "label 候选" (>=1 汉字字符) 和 "value 候选" (纯数字/英文数字的 token).
+    # value 候选里最长的那个就是"主值" (数字长度 >= 6 字符通常是板号; < 6 是尺寸).
+    # 板号字段期望 14 位数字 (例如 26302650370101); 尺寸字段期望 ≤ 5 位.
+    # 简单版: 把所有 value token 拼起来
     result: dict[str, Any] = {}
     for row in rows:
-        # 找 label (BOARD_LABELS 里的)
-        label_idx = -1
-        label_key = None
-        for idx, w in enumerate(row):
-            lk = w["text"].replace("号", "").replace(":", "").replace("：", "")
-            if lk in BOARD_LABELS:
-                label_idx = idx
-                label_key = lk
-                break
-        if label_idx < 0:
+        if not row:
             continue
-        # 拼 label 之后的 token 作为 value
-        value_tokens = [w["text"] for w in row[label_idx + 1:]]
-        value = "".join(value_tokens).strip()
-        # 去掉可能的 [mm]/[单位] 后缀
+        # 收集 token 类型: 中文 label vs 数字 value
+        labels = []
+        values = []
+        for w in row:
+            t = w["text"]
+            # 纯数字/小数 (>=2 字符) → value
+            import re as _re_inner
+            is_numeric = bool(_re_inner.match(r"^[\d.,]+$", t)) and len(t) >= 2
+            has_chinese = any('一' <= c <= '鿿' for c in t)
+            if has_chinese:
+                labels.append(w)
+            elif is_numeric:
+                values.append(w)
+            # else: 单位 ([mm]: 等) 或 噪声 - 忽略
+
+        if not labels:
+            continue
+
+        # 拼接 label 文字
         import re as _re
+        label_text = "".join(w["text"] for w in labels)
+        label_clean = _re.sub(r"[\[\]【\]:：\s]", "", label_text)
+        key_cn = None
+        if label_clean in LABEL_KEYS_CN:
+            key_cn = label_clean
+        else:
+            for full in LABEL_KEYS_CN:
+                if len(full) >= 2 and all(c in label_clean for c in full):
+                    key_cn = full
+                    break
+        if not key_cn:
+            continue
+
+        # 拼接 value
+        value = "".join(w["text"] for w in values)
         value = _re.sub(r"\[[a-z]+\]:?", "", value).strip()
-        # 尝试解析为数字
         try:
-            v = float(value)
+            v = float(value.replace(",", ""))
             if v == int(v):
                 v = int(v)
             value = v
         except (ValueError, TypeError):
             pass
-        result[BOARD_LABELS[label_key]] = value
+        result[LABEL_KEYS_CN[key_cn]] = value
 
     return result
