@@ -35,7 +35,7 @@ def _call_llm(prompt: str, image_path: str | Path) -> str:
                 ],
             }
         ],
-        "max_tokens": 2048,
+        "max_tokens": 4096,
     }).encode("utf-8")
 
     req = urllib.request.Request(
