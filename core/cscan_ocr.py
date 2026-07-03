@@ -109,6 +109,7 @@ def extract_cscan_from_xlsx(
 
         views = split_cscan_views(tmp_path, images_dir, prefix=prefix)
 
+        # 保存分割结果
         row_dict = result.setdefault(row_idx, {})
         for en_name, src_path in views.items():
             if en_name == "warnings":
@@ -120,9 +121,11 @@ def extract_cscan_from_xlsx(
                 src.rename(new_path)
             row_dict[f"{prefix}_{en_name}"] = str(new_path)
 
-        # 清理临时文件
-        if tmp_path.exists():
-            tmp_path.unlink()
+        # 原图也保留 (用于板信息 OCR 等)
+        full_name = f"{prefix}_full-{row_idx:03d}.png"
+        full_path = images_dir / full_name
+        tmp_path.rename(full_path)
+        row_dict[f"{prefix}_full"] = str(full_path)
 
     return result
 

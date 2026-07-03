@@ -32,6 +32,7 @@ def merge_cscan_records(
     xlsx_path: str | Path,
     image_map: dict[int, dict[str, str]],
     ocr_table_map: dict[int, list[dict[str, Any]]] | None = None,
+    ocr_board_map: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """从 xlsx 的 5.1 sheet 提取基础字段, 与 image_map/OCR 结果合并.
 
@@ -46,6 +47,7 @@ def merge_cscan_records(
     """
     xlsx_path = Path(xlsx_path)
     ocr_table_map = ocr_table_map or {}
+    ocr_board_map = ocr_board_map or {}
 
     wb = load_workbook(str(xlsx_path), data_only=True)
     if len(wb.sheetnames) < 2:
@@ -85,10 +87,15 @@ def merge_cscan_records(
                 record[k] = None
         # OCR 字段
         record["缺陷表格"] = ocr_table_map.get(row_idx, [])
-        # 板信息字段暂留 None (OCR 还没做, 下步补)
-        for cn in ("板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
-                    "标准号", "厚度", "长度", "宽度"):
-            record.setdefault(cn, None)
+        # 板信息字段: 从 OCR 结果获取
+        board = ocr_board_map.get(row_idx, {})
+        for en, cn in [
+            ("plate_no", "板号"), ("test_code", "探伤代号"),
+            ("grade", "钢种OCR"), ("prod_date", "生产日期"),
+            ("test_date", "检测日期"), ("standard", "标准号"),
+            ("thickness", "厚度"), ("length", "长度"), ("width", "宽度"),
+        ]:
+            record[cn] = board.get(en)
         record["warnings"] = []
         records.append(record)
 

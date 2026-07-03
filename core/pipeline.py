@@ -477,10 +477,11 @@ class ProcessPipeline:
             total_rows = len(image_map)
             report("extract", 0.7, f"已切图 {total_rows} 行")
 
-            # ========== 阶段 2-3: OCR (缺陷表格) ==========
-            report("ocr", 0.0, "OCR 缺陷表格...")
-            from .cscan_ocr import ocr_defect_table
+            # ========== 阶段 2-3: OCR (缺陷表格 + 板信息) ==========
+            report("ocr", 0.0, "OCR 缺陷表格 + 板信息...")
+            from .cscan_ocr import ocr_defect_table, ocr_board_info
             ocr_table_map: dict[int, list[dict]] = {}
+            ocr_board_map: dict[int, dict] = {}
             total = max(total_rows, 1)
             for idx, (row_idx, paths) in enumerate(sorted(image_map.items())):
                 if self.cancel_event is not None and self.cancel_event.is_set():
@@ -488,6 +489,10 @@ class ProcessPipeline:
                 ft = paths.get("F_table") or paths.get("G_table")
                 if ft and os.path.exists(ft):
                     ocr_table_map[row_idx] = ocr_defect_table(ft)
+                # 板信息从原图识别 (底部有 厚度/长度/宽度/板号 等)
+                fc = paths.get("F_full") or paths.get("G_full")
+                if fc and os.path.exists(fc):
+                    ocr_board_map[row_idx] = ocr_board_info(fc)
                 report("ocr", 0.1 + 0.7 * (idx + 1) / total, f"OCR {idx + 1}/{total}")
 
             # ========== 阶段 4: merge ==========
@@ -495,6 +500,7 @@ class ProcessPipeline:
             records = merge_cscan_records(
                 file_path, image_map,
                 ocr_table_map=ocr_table_map,
+                ocr_board_map=ocr_board_map,
             )
             # 补 row_index 给 result
             for r in records:
