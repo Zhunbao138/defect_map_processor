@@ -155,6 +155,23 @@ def ocr_defect_table(table_image_path: str | Path) -> list[dict[str, Any]]:
     if w < 1500:
         img = img.resize((w * 2, h * 2), Image.LANCZOS)
 
+    # 把彩色单元格(红/绿警告色) 转成黑字白底, 提升 OCR 准确率
+    try:
+        import numpy as np
+        arr = np.array(img)
+        if arr.ndim == 3 and arr.shape[2] >= 3:
+            # 取 max(R,G,B): 红色文字变深, 背景(白) 仍接近 255
+            gray = arr.max(axis=2)
+        else:
+            gray = arr if arr.ndim == 2 else arr[..., 0]
+        # 二值化: 文字 (暗) -> 黑 (0), 背景 (亮) -> 白 (255)
+        bw = np.where(gray < 160, 0, 255).astype('uint8')
+        # PIL 期望 L 模式 (灰度)
+        from PIL import Image as _PILImage
+        img = _PILImage.fromarray(bw, mode='L')
+    except Exception:
+        img = img.convert('L')
+
     try:
         data = pytesseract.image_to_data(
             img,
@@ -165,8 +182,8 @@ def ocr_defect_table(table_image_path: str | Path) -> list[dict[str, Any]]:
     except Exception as e:
         return [{"error": f"OCR 失败: {e}"}]
 
-    # 按 (block, par, line) 分组
-    lines: dict[tuple, list[dict]] = {}
+    # 收集所有 numeric token (去掉汉字标签)
+    items = []
     for i in range(len(data["text"])):
         text = str(data["text"][i]).strip()
         if not text:
@@ -177,37 +194,54 @@ def ocr_defect_table(table_image_path: str | Path) -> list[dict[str, Any]]:
             conf = -1
         if conf < 30:
             continue
-        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
-        lines.setdefault(key, []).append({
-            "text": text,
-            "left": data["left"][i],
-            "top": data["top"][i],
-            "width": data["width"][i],
-        })
+        t = text.replace(",", "").replace("，", "")
+        try:
+            float(t)
+            items.append({
+                "text": text,
+                "value": float(t) if "." in t else int(t),
+                "left": data["left"][i],
+                "top": data["top"][i],
+            })
+        except ValueError:
+            continue
 
-    # 按 top 排序行, 每行按 left 排序词
-    sorted_lines = sorted(lines.values(), key=lambda w: (min(x["top"] for x in w), min(x["left"] for x in w)))
+    if not items:
+        return []
 
-    # 解析每行: 13 个数字字段
-    # 假设第 1 个是序号, 后 12 个是其他字段
+    # 算法: 从 items 中找出每一条数据行.
+    # 关键观察: 表头行在最上面 (Y 起始值 = 2733.3 之类), 实际数据行在表头下面.
+    # 表里 "Y 起始/终止/中点" 列的值集中在头几列有大量相同值 (2733.3 等), 用于识别表头.
+    # 用更稳的策略: 按 top 聚类, 然后每行按 left 排序, 找最长的那个数组 (≥13 个数字).
+    items.sort(key=lambda x: (x["top"], x["left"]))
+
+    # 按 top 间隔聚类 (60 px 容差, 表格行高约 60 px)
+    clusters = []
+    for it in items:
+        if clusters and abs(clusters[-1][0]["top"] - it["top"]) < 60:
+            clusters[-1].append(it)
+        else:
+            clusters.append([it])
+
+    # 找每行 cluster 中前 13 个数值
     results = []
-    for line_words in sorted_lines:
-        line_words.sort(key=lambda w: w["left"])
-        nums = []
-        for w in line_words:
-            t = w["text"].replace(",", "").replace("，", "")
-            try:
-                if "." in t:
-                    nums.append(float(t))
-                else:
-                    nums.append(int(t))
-            except (ValueError, TypeError):
-                nums.append(None)
-        if len(nums) >= 13 and all(n is not None for n in nums[:13]):
-            row = {"序号": int(nums[0])}
-            for col_name, val in zip(DEFECT_TABLE_COLS[1:], nums[1:13]):
-                row[col_name] = val
-            results.append(row)
+    for cluster in clusters:
+        # 按 left 排序 (行内的列顺序)
+        cluster.sort(key=lambda x: x["left"])
+        # 去重 (OCR 偶尔把同一数字拆成两个 token, left < 5 px 视为重复)
+        deduped = []
+        for it in cluster:
+            if deduped and abs(it["left"] - deduped[-1]["left"]) < 5:
+                continue
+            deduped.append(it)
+        vals = [it["value"] for it in deduped]
+        if len(vals) < 13:
+            continue
+        nums = vals[:13]
+        row = {"序号": int(nums[0])}
+        for col_name, val in zip(DEFECT_TABLE_COLS[1:], nums[1:13]):
+            row[col_name] = val
+        results.append(row)
 
     return results
 
