@@ -109,32 +109,16 @@
                 </div>
             </div>
 
-            <!-- 摘要卡 (4 个统计) -->
-            <div class="summary-cards">
-                <div class="summary-card">
-                    <div class="sc-label">总记录数</div>
-                    <div class="sc-value" id="sc-total">-</div>
-                </div>
-                <div class="summary-card">
-                    <div class="sc-label">已 OCR 识别</div>
-                    <div class="sc-value" id="sc-ocr">-</div>
-                </div>
-                <div class="summary-card">
-                    <div class="sc-label">钢板号 (去重)</div>
-                    <div class="sc-value" id="sc-plates">-</div>
-                </div>
-                <div class="summary-card">
-                    <div class="sc-label">告警 / 注意事项</div>
-                    <div class="sc-value" id="sc-warnings">-</div>
-                </div>
-            </div>
-
             <table class="record-table" id="record-table">
                 <thead>
                     <tr>
                         <th class="col-index sortable" data-col="序号">
                             <span class="th-content"># <span class="sort-arrow"></span></span>
                             <button type="button" class="th-filter-btn" data-col="序号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-factory sortable" data-col="生产厂">
+                            <span class="th-content">生产厂 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="生产厂" title="筛选本列">⚙</button>
                         </th>
                         <th class="col-plate sortable" data-col="钢板号">
                             <span class="th-content">钢板号 <span class="sort-arrow"></span></span>
@@ -144,7 +128,6 @@
                             <span class="th-content">钢种 <span class="sort-arrow"></span></span>
                             <button type="button" class="th-filter-btn" data-col="钢种" title="筛选本列">⚙</button>
                         </th>
-                        <th class="col-thumb">缩略图</th>
                         <th class="sortable" data-col="类别">
                             <span class="th-content">类别 <span class="sort-arrow"></span></span>
                             <button type="button" class="th-filter-btn" data-col="类别" title="筛选本列">⚙</button>
@@ -153,9 +136,6 @@
                             <span class="th-content">缺陷分析 <span class="sort-arrow"></span></span>
                             <button type="button" class="th-filter-btn" data-col="缺陷分析" title="筛选本列">⚙</button>
                         </th>
-                        <th class="col-meta">材料尺寸</th>
-                        <th class="col-meta">中心 X/Y</th>
-                        <th class="col-action">详情</th>
                     </tr>
                 </thead>
                 <tbody id="record-tbody">

@@ -148,7 +148,7 @@ async function loadRecords() {
 let currentSort = { col: null, dir: 'none' };  // 'none' | 'asc' | 'desc'
 
 // 筛选状态: { 列名: { excluded: Set<值>, distinct: [...]全量 } }
-const FILTER_COLS = ['钢板号', '钢种', '类别', '缺陷分析'];
+const FILTER_COLS = ['生产厂', '钢板号', '钢种', '类别', '缺陷分析'];
 const filterState = {};
 
 // 分页状态
@@ -288,8 +288,7 @@ function renderRecords() {
     tbody.innerHTML = '';
     paged.forEach(rec => tbody.appendChild(createRecordRow(rec)));
     updateSortIndicators();
-    renderPagination(displayed.length);
-    renderSummaryCards(displayed);
+    renderPagination(displayed.length);                 // 新增: 渲染分页器
     // 同步表头筛选按钮状态 (有筛选时高亮)
     document.querySelectorAll('.th-filter-btn').forEach(b => {
         const c = b.dataset.col;
@@ -297,28 +296,6 @@ function renderRecords() {
         b.classList.toggle('active', excluded);
         b.title = excluded ? `${c} (${filterState[c].excluded.size} 项已筛除)` : `筛选本列`;
     });
-}
-
-function renderSummaryCards(records) {
-    // 总记录数 / 已 OCR 识别 / 钢板号去重 / 警告数
-    const total = records.length;
-    let withOcr = 0;
-    const plates = new Set();
-    let warnings = 0;
-    for (const r of records) {
-        if (r['缺陷数据'] && Object.keys(r['缺陷数据']).length > 0) withOcr++;
-        const p = r['钢板号'];
-        if (p) plates.add(p);
-        warnings += (r['warnings'] || []).length;
-    }
-    const setText = (id, v) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = v;
-    };
-    setText('sc-total', total);
-    setText('sc-ocr', `${withOcr} / ${total}`);
-    setText('sc-plates', plates.size);
-    setText('sc-warnings', warnings);
 }
 
 function updateSortIndicators() {
@@ -465,33 +442,20 @@ function showImage(url) {
 }
 
 
-// ===== 表格行 (zhongban, 紧凑风格, 与 cscan 视觉对齐) =====
+// ===== 表格行 =====
 function createRecordRow(rec) {
     const tr = document.createElement('tr');
     tr.dataset.searchText = [
         rec['钢板号'], rec['生产厂'], rec['钢种'], rec['类别'], rec['缺陷分析']
     ].join(' ').toLowerCase();
-    const img = rec['图-1'] ? `/api/image/${currentTaskId}/${relPath(rec['图-1'])}` : '';
-    const dp = rec['缺陷数据'] || {};
-    const dim = dp['材料尺寸'] || '-';
-    const xy = (dp['缺陷中心X'] && dp['缺陷中心Y']) ? `${dp['缺陷中心X']} / ${dp['缺陷中心Y']}` : '-';
-    const dep = dp['缺陷深度'] ? `${dp['缺陷深度']} mm` : '-';
-
     tr.innerHTML = `
         <td class="col-index">#${rec['序号'] || rec['row_index']}</td>
+        <td class="col-factory">${escapeHtml(rec['生产厂'] || '-')}</td>
         <td class="col-plate">${escapeHtml(rec['钢板号'] || '-')}</td>
         <td class="col-grade">${escapeHtml(rec['钢种'] || '-')}</td>
-        <td class="col-thumb">${img ? `<img src="${escapeAttr(img)}" loading="lazy" alt="">` : '<span style="color:#cbd5e0">—</span>'}</td>
         <td><span class="col-category">${escapeHtml(rec['类别'] || '-')}</span></td>
         <td class="col-defect" title="${escapeAttr(rec['缺陷分析'] || '')}">${escapeHtml(rec['缺陷分析'] || '-')}</td>
-        <td class="col-meta">${escapeHtml(dim)}</td>
-        <td class="col-meta">${escapeHtml(xy)}</td>
-        <td class="col-action"><button class="btn-secondary btn-sm" data-action="open">查看</button></td>
     `;
-    tr.querySelector('button').addEventListener('click', (e) => {
-        e.stopPropagation();
-        openRecordDetail(rec);
-    });
     tr.addEventListener('click', () => openRecordDetail(rec));
     return tr;
 }
