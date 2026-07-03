@@ -129,7 +129,8 @@ def _load_cscan_from_db(conn, task_id: str) -> list[dict]:
         "SELECT * FROM cscan_records WHERE task_id = ? ORDER BY row_index",
         (task_id,),
     ).fetchall()
-    cols = [d[0] for d in conn.execute("PRAGMA table_info(cscan_records)").fetchall()]
+    # PRAGMA table_info 返回 (cid, name, type, notnull, dflt_value, pk), name 在 index 1
+    cols = [d[1] for d in conn.execute("PRAGMA table_info(cscan_records)").fetchall()]
     results = []
     for row in rows:
         d = dict(zip(cols, row))
