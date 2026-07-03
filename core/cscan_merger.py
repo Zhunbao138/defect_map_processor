@@ -106,7 +106,11 @@ _DISPLAY_SCALE = 0.25   # 图片在 xlsx 中显示缩放 (与 data_merger 一致
 
 
 def save_excel(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
-    """生成 cscan_records.xlsx, 嵌入 6 张子图 (原图字节不变, 显示缩放)."""
+    """生成 cscan_records.xlsx (两个 sheet).
+
+    Sheet 1 "缺陷记录": 基础字段 + 板信息 + 6 张子图
+    Sheet 2 "缺陷表格": 每条记录的 13 列缺陷明细
+    """
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, Alignment, PatternFill
@@ -120,32 +124,50 @@ def save_excel(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = "缺陷记录"
 
-    # 表头
-    headers = [
+    # ==================== Sheet 1: 缺陷记录 ====================
+    ws1 = wb.active
+    ws1.title = "缺陷记录"
+    header_font = Font(bold=True)
+    header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+    header_align = Alignment(horizontal="center")
+
+    # 表头: 文本列 + 图片列
+    text_headers = [
         "序号", "生产厂", "钢板号", "钢种", "类别", "缺陷分析",
-        "F_table", "F_ascan", "F_cscan",
-        "G_table", "G_ascan", "G_cscan",
+        "厚度[mm]", "长度[mm]", "宽度[mm]",
+        "板号", "探伤代号", "钢种OCR", "生产日期", "检测日期", "标准号",
+        "warnings",
     ]
-    for col_idx, h in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_idx, value=h)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center")
+    img_headers = ["F_table", "F_ascan", "F_cscan", "G_table", "G_ascan", "G_cscan"]
+    all_headers = text_headers + img_headers
+
+    for col_idx, h in enumerate(all_headers, 1):
+        cell = ws1.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
 
     for row_idx, rec in enumerate(records, 2):
-        row_data = [
+        # 文本列
+        text_vals = [
             rec.get("序号", ""), rec.get("生产厂", ""), rec.get("钢板号", ""),
             rec.get("钢种", ""), rec.get("类别", ""), rec.get("缺陷分析", ""),
+            rec.get("厚度", ""), rec.get("长度", ""), rec.get("宽度", ""),
+            rec.get("板号", ""), rec.get("探伤代号", ""),
+            rec.get("钢种OCR", ""), rec.get("生产日期", ""),
+            rec.get("检测日期", ""), rec.get("标准号", ""),
+            "; ".join(rec.get("warnings", [])) if isinstance(rec.get("warnings"), list) else str(rec.get("warnings", "") or ""),
         ]
-        for h in headers[6:]:  # 6 个子图路径
-            row_data.append(rec.get(h, ""))
-        for col_idx, val in enumerate(row_data, 1):
-            header = headers[col_idx - 1]
-            cell = ws.cell(row=row_idx, column=col_idx, value="")
-            if header in _CSCAN_IMAGE_COLUMNS and val and isinstance(val, str):
+        for ci, val in enumerate(text_vals, 1):
+            cell = ws1.cell(row=row_idx, column=ci, value=val if val is not None else "")
+
+        # 图片列
+        for ci_offset, h in enumerate(img_headers):
+            col_idx = len(text_headers) + ci_offset + 1
+            val = rec.get(h, "")
+            cell = ws1.cell(row=row_idx, column=col_idx, value="")
+            if val and isinstance(val, str):
                 path = Path(val)
                 if path.is_file():
                     try:
@@ -154,30 +176,50 @@ def save_excel(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
                         disp_w, disp_h = int(raw_w * _DISPLAY_SCALE), int(raw_h * _DISPLAY_SCALE)
                         img.width, img.height = disp_w, disp_h
                         img.anchor = cell.coordinate
-                        ws.add_image(img)
+                        ws1.add_image(img)
                         if hasattr(img.anchor, 'ext') and img.anchor.ext is not None and disp_w and disp_h:
                             img.anchor.ext.cx = pixels_to_EMU(disp_w)
                             img.anchor.ext.cy = pixels_to_EMU(disp_h)
-                        col_letter = get_column_letter(cell.column)
-                        target_w = int(disp_w * 0.14) + 2 if disp_w else 15
-                        ws.column_dimensions[col_letter].width = max(
-                            ws.column_dimensions[col_letter].width or 0, target_w
+                        cl = get_column_letter(cell.column)
+                        ws1.column_dimensions[cl].width = max(
+                            ws1.column_dimensions[cl].width or 10, int(disp_w * 0.14) + 2
                         )
-                        target_h = int(disp_h * 0.75) + 4 if disp_h else 15
-                        ws.row_dimensions[cell.row].height = max(
-                            ws.row_dimensions[cell.row].height or 0, target_h
+                        ws1.row_dimensions[cell.row].height = max(
+                            ws1.row_dimensions[cell.row].height or 10, int(disp_h * 0.75) + 4
                         )
                         continue
                     except Exception:
                         pass
                 cell.value = val if val else ""
-            else:
-                cell.value = val
 
-    # 非图片列宽自适应
-    for col_idx in range(1, 7):
-        col_letter = get_column_letter(col_idx)
-        ws.column_dimensions[col_letter].width = max(12, min(40, len(headers[col_idx - 1]) * 2 + 5))
+    # 文本列宽自适应
+    for ci in range(1, len(text_headers) + 1):
+        cl = get_column_letter(ci)
+        ws1.column_dimensions[cl].width = max(12, min(40, len(all_headers[ci - 1]) * 2 + 3))
+
+    # ==================== Sheet 2: 缺陷表格 (13 列明细) ====================
+    ws2 = wb.create_sheet("缺陷表格")
+    defect_cols = ["钢板号", "序号", "X起始", "X终止", "X中点", "X长度",
+                   "Y起始", "Y终止", "Y中点", "Y长度", "面积", "类型", "深度", "幅值"]
+    for col_idx, h in enumerate(defect_cols, 1):
+        cell = ws2.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+
+    sheet2_row = 2
+    for rec in records:
+        plate = rec.get("钢板号", "")
+        defect_table = rec.get("缺陷表格") or []
+        for drow in defect_table:
+            vals = [plate] + [drow.get(c, "") for c in defect_cols[1:]]
+            for ci, val in enumerate(vals, 1):
+                ws2.cell(row=sheet2_row, column=ci, value=val if val is not None else "")
+            sheet2_row += 1
+
+    for ci in range(1, len(defect_cols) + 1):
+        cl = get_column_letter(ci)
+        ws2.column_dimensions[cl].width = max(10, min(20, len(defect_cols[ci - 1]) * 2 + 5))
 
     excel_path = output_dir / "cscan_records.xlsx"
     wb.save(str(excel_path))
