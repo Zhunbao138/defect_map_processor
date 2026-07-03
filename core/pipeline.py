@@ -44,6 +44,9 @@ class ProcessConfig:
     db_path: str | None = None
     # 限制处理的记录数 (None = 全部, 2 = 只前2条, [3,5] = 指定行号)
     limit_records: int | list[int] | None = None
+    # 文档类型: "zhongban" (中板厂, 默认) 或 "cscan" (中厚板卷厂).
+    # cscan 走独立流水线 (切图 + JSON + 独立 SQLite 表), 不做传统 6 列 OCR/切图
+    task_type: str = "zhongban"
 
 
 @dataclass
@@ -76,7 +79,13 @@ class ProcessPipeline:
 
         progress_callback: callable(stage: str, percent: float, message: str) -> None
             用于 Web 前端实时显示进度。
+
+        task_type 分支: cscan 走独立流水线 (跳过大半 zhongban 流程)
         """
+        # cscan 分支: 不同的文档类型, 完全独立的处理链
+        if self.config.task_type == "cscan":
+            return self._run_cscan(progress_callback)
+
         start_time = time.time()
         file_path = Path(self.config.file_path)
         output_dir = Path(self.config.output_dir)
@@ -426,6 +435,98 @@ class ProcessPipeline:
             )
 
 
+    def _run_cscan(self, progress_callback=None) -> ProcessResult:
+        """中厚板卷厂 (cscan) 文档的独立处理链.
+
+        阶段:
+          1. extract: 从 xlsx 5.1 sheet 提 F/G 列原图, 切出 8 个子图/行 (table/ascan/cscan/board)
+          2. ocr_table (留空, 后续加): 13 列缺陷表格识别
+          3. ocr_board (留空): 板信息识别
+          4. merge: bundle 成 cscan_records schema
+          5. database: 写 SQLite cscan_records 表 + JSON
+        """
+        from .cscan_ocr import extract_cscan_from_xlsx
+        from .cscan_merger import merge_cscan_records, save_json, save_to_db
+        import sqlite3
+
+        def report(stage: str, percent: float, message: str):
+            # 取消检查 (与 zhongban 流程一致)
+            if self.cancel_event is not None and self.cancel_event.is_set():
+                raise InterruptedError("任务被用户取消")
+            if progress_callback:
+                progress_callback(stage, percent, message)
+
+        start_time = time.time()
+        file_path = Path(self.config.file_path)
+        output_dir = Path(self.config.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        images_dir = output_dir / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        result = ProcessResult(
+            success=False,
+            file_path=str(file_path),
+            output_dir=str(output_dir),
+            records=[],
+        )
+
+        try:
+            # ========== 阶段 1: 提取 + 切图 ==========
+            report("extract", 0.0, "提取 F/G 列原图并切图...")
+            image_map = extract_cscan_from_xlsx(file_path, images_dir)
+            total_rows = len(image_map)
+            report("extract", 0.7, f"已切图 {total_rows} 行")
+
+            # ========== 阶段 2-3: OCR (暂时跳过) ==========
+            report("ocr", 0.0, "OCR 暂时跳过 (缺陷表格 + 板信息 OCR 待后续添加)")
+
+            # ========== 阶段 4: merge ==========
+            report("merge", 0.0, "合并字段...")
+            records = merge_cscan_records(file_path, image_map)
+            # 补 row_index 给 result
+            for r in records:
+                r.setdefault("row_index", 0)
+            report("merge", 0.7, f"已合并 {len(records)} 行")
+
+            # ========== 阶段 5: 保存 JSON + DB ==========
+            json_path = save_json(records, output_dir)
+            result.json_path = str(json_path)
+            report("database", 0.5, f"已存 JSON: {json_path.name}")
+
+            db_count = 0
+            if self.config.save_to_db:
+                db_path = Path(self.config.db_path) if self.config.db_path else Path("data/defect_map.db")
+                conn = sqlite3.connect(str(db_path))
+                try:
+                    db_count = save_to_db(conn, task_id=str(output_dir.name), records=records)
+                finally:
+                    conn.close()
+                result.db_path = str(db_path)
+                report("database", 0.9, f"已存 DB: {db_count} 行")
+
+            # ========== 完成 ==========
+            result.success = True
+            result.records = records
+            result.elapsed_seconds = time.time() - start_time
+            result.stats = {
+                "records_count": len(records),
+                "images_count": total_rows * 8,   # 4 sub-images × F + G = 8 per row
+            }
+            report("complete", 1.0, f"完成 ({result.elapsed_seconds:.1f}s)")
+            return result
+
+        except InterruptedError as e:
+            result.error = str(e)
+            result.elapsed_seconds = time.time() - start_time
+            return result
+
+        except Exception as e:
+            import traceback
+            result.error = f"{e}\n\n{traceback.format_exc()}"
+            result.elapsed_seconds = time.time() - start_time
+            return result
+
+
 def run_pipeline(
     file_path: str | Path,
     output_dir: str | Path = "output",
@@ -436,6 +537,7 @@ def run_pipeline(
     image_match_strategy: str = "order",
     db_path: str | None = None,
     limit_records: int | list[int] | None = None,
+    task_type: str = "zhongban",
 ) -> ProcessResult:
     """便捷函数：运行完整流水线。
 
@@ -453,6 +555,7 @@ def run_pipeline(
         image_match_strategy=image_match_strategy,
         db_path=db_path,
         limit_records=limit_records,
+        task_type=task_type,
     )
     pipeline = ProcessPipeline(config)
     return pipeline.run(progress_callback)
