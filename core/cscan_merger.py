@@ -31,7 +31,7 @@ CSCAN_RECORD_FIELDS = (
 def merge_cscan_records(
     xlsx_path: str | Path,
     image_map: dict[int, dict[str, str]],
-    ocr_table_map: dict[int, list[dict[str, Any]]] | None = None,
+    ocr_table_map: dict[int, dict[str, list[dict[str, Any]]]] | None = None,
     ocr_board_map: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """从 xlsx 的 5.1 sheet 提取基础字段, 与 image_map/OCR 结果合并.
@@ -85,8 +85,10 @@ def merge_cscan_records(
         for k in CSCAN_RECORD_FIELDS:
             if k.startswith(("F_", "G_")) and k not in record:
                 record[k] = None
-        # OCR 字段
-        record["缺陷表格"] = ocr_table_map.get(row_idx, [])
+        # OCR 字段 — F/G 表格分别存
+        tables = ocr_table_map.get(row_idx, {})
+        record["缺陷表格_F"] = tables.get("F", [])
+        record["缺陷表格_G"] = tables.get("G", [])
         # 板信息字段: 从 OCR 结果获取
         board = ocr_board_map.get(row_idx, {})
         for en, cn in [
@@ -204,29 +206,28 @@ def save_excel(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
         cl = get_column_letter(ci)
         ws1.column_dimensions[cl].width = max(12, min(40, len(all_headers[ci - 1]) * 2 + 3))
 
-    # ==================== Sheet 2: 缺陷表格 (13 列明细) ====================
-    ws2 = wb.create_sheet("缺陷表格")
+    # ==================== Sheet 2+3: F/G 缺陷表格 ====================
     defect_cols = ["钢板号", "序号", "X起始", "X终止", "X中点", "X长度",
                    "Y起始", "Y终止", "Y中点", "Y长度", "面积", "类型", "深度", "幅值"]
-    for col_idx, h in enumerate(defect_cols, 1):
-        cell = ws2.cell(row=1, column=col_idx, value=h)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_align
-
-    sheet2_row = 2
-    for rec in records:
-        plate = rec.get("钢板号", "")
-        defect_table = rec.get("缺陷表格") or []
-        for drow in defect_table:
-            vals = [plate] + [drow.get(c, "") for c in defect_cols[1:]]
-            for ci, val in enumerate(vals, 1):
-                ws2.cell(row=sheet2_row, column=ci, value=val if val is not None else "")
-            sheet2_row += 1
-
-    for ci in range(1, len(defect_cols) + 1):
-        cl = get_column_letter(ci)
-        ws2.column_dimensions[cl].width = max(10, min(20, len(defect_cols[ci - 1]) * 2 + 5))
+    for suffix in ("F", "G"):
+        ws2 = wb.create_sheet(f"缺陷表格_{suffix}")
+        for col_idx, h in enumerate(defect_cols, 1):
+            cell = ws2.cell(row=1, column=col_idx, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+        sheet_row = 2
+        for rec in records:
+            plate = rec.get("钢板号", "")
+            dt = rec.get(f"缺陷表格_{suffix}") or []
+            for drow in dt:
+                vals = [plate] + [drow.get(c, "") for c in defect_cols[1:]]
+                for ci, val in enumerate(vals, 1):
+                    ws2.cell(row=sheet_row, column=ci, value=val if val is not None else "")
+                sheet_row += 1
+        for ci in range(1, len(defect_cols) + 1):
+            cl = get_column_letter(ci)
+            ws2.column_dimensions[cl].width = max(10, min(20, len(defect_cols[ci - 1]) * 2 + 5))
 
     excel_path = output_dir / "cscan_records.xlsx"
     wb.save(str(excel_path))

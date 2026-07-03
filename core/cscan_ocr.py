@@ -236,7 +236,7 @@ def ocr_defect_table(table_image_path: str | Path) -> list[dict[str, Any]]:
                 continue
             deduped.append(it)
         vals = [it["value"] for it in deduped]
-        if len(vals) < 13:
+        if len(vals) < 10:  # 放宽: 部分行 OCR 丢 1-3 个 token 仍保留
             continue
         nums = vals[:13]
         row = {"序号": int(nums[0])}

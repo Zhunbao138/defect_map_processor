@@ -480,15 +480,18 @@ class ProcessPipeline:
             # ========== 阶段 2-3: OCR (缺陷表格 + 板信息) ==========
             report("ocr", 0.0, "OCR 缺陷表格 + 板信息...")
             from .cscan_ocr import ocr_defect_table, ocr_board_info
-            ocr_table_map: dict[int, list[dict]] = {}
+            ocr_table_map: dict[int, dict] = {}  # {row_idx: {"F": [...], "G": [...]}}
             ocr_board_map: dict[int, dict] = {}
             total = max(total_rows, 1)
             for idx, (row_idx, paths) in enumerate(sorted(image_map.items())):
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise InterruptedError("任务被用户取消")
-                ft = paths.get("F_table") or paths.get("G_table")
-                if ft and os.path.exists(ft):
-                    ocr_table_map[row_idx] = ocr_defect_table(ft)
+                row_tables = {}
+                for prefix in ("F", "G"):
+                    fp = paths.get(f"{prefix}_table")
+                    if fp and os.path.exists(fp):
+                        row_tables[prefix] = ocr_defect_table(fp)
+                ocr_table_map[row_idx] = row_tables
                 # 板信息从原图识别 (底部有 厚度/长度/宽度/板号 等)
                 fc = paths.get("F_full") or paths.get("G_full")
                 if fc and os.path.exists(fc):
