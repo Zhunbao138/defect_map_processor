@@ -822,6 +822,11 @@ async function refreshTaskList() {
     }
 }
 
+// 任务下拉切换
+document.getElementById('task-list')?.addEventListener('change', (e) => {
+    selectTask(e.target.value);
+});
+
 async function selectTask(taskId) {
     if (!taskId) return;
     currentTaskId = taskId;
