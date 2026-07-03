@@ -266,14 +266,15 @@ BOARD_LABELS = {
 
 
 def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
-    """识别板信息 panel, 返回 {plate_no, test_code, grade, thickness, length, width, ...}.
+    """识别板信息 panel. 裁剪原图右下角面板 (x>68%, y>68%), 放大 4x + 二值化.
 
-    不预处理颜色 (直方图阈值会破坏字符), 只放大.
-    用模板字符串修复 OCR 错误的字符 ('1' vs 'l'/'I'/'|' 等).
+    板信息 panel 有白底网格线, 含: 板号/探伤代号/钢种/生产日期/检测日期/标准号/厚度/长度/宽度
+    Tesseract 精度有限, 数值可能有 OCR 误差; 宁可返回近似值也不要 None.
     """
     try:
         import pytesseract
-        from PIL import Image
+        import cv2
+        import re as _re
     except ImportError:
         return {}
 
@@ -281,113 +282,42 @@ def ocr_board_info(board_image_path: str | Path) -> dict[str, Any]:
     if not board_image_path.exists():
         return {}
 
-    img = Image.open(board_image_path)
-    w, h = img.size
-    # 放大 3x 提升小字识别率
-    if w < 800:
-        img = img.resize((w * 3, h * 3), Image.LANCZOS)
-    img = img.convert("L")
-
-    try:
-        data = pytesseract.image_to_data(
-            img, lang="chi_sim+eng",
-            output_type=pytesseract.Output.DICT,
-            config="--psm 6",
-        )
-    except Exception:
+    img_cv = cv2.imread(str(board_image_path))
+    if img_cv is None:
         return {}
+    h, w = img_cv.shape[:2]
 
-    items = []
-    for i in range(len(data["text"])):
-        text = str(data["text"][i]).strip()
-        if not text:
-            continue
-        try:
-            conf = float(data["conf"][i])
-        except (ValueError, TypeError):
-            conf = -1
-        if conf < 25:
-            continue
-        items.append({
-            "text": text,
-            "left": data["left"][i],
-            "top": data["top"][i],
-        })
+    # 右下角 ~30% 区域 (板信息面板)
+    x0, y0 = int(w * 0.65), int(h * 0.65)
+    crop = img_cv[y0:, x0:]
+    # 放大 4x + 二值化反相 (白底黑字更适合 Tesseract)
+    big = cv2.resize(crop, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+    _, bw = cv2.threshold(gray, 140, 255, cv2.THRESH_BINARY)
+    # 白底黑字 → 直接用 image_to_string (不用 image_to_data, 数据少时更稳)
+    text = pytesseract.image_to_string(bw, lang="chi_sim+eng", config="--psm 6")
 
-    if not items:
-        return {}
-
-    import re as _re
-
-    LABEL_KEYS_CN = {
-        "板号": "plate_no", "探伤代号": "test_code", "钢种": "grade",
-        "生产日期": "prod_date", "检测日期": "test_date", "标准号": "standard",
-        "厚度": "thickness", "长度": "length", "宽度": "width",
-    }
-
-    # 按 top 分行 (±25 px)
-    items.sort(key=lambda x: (x["top"], x["left"]))
-    rows: list[list[dict]] = []
-    for it in items:
-        if rows and abs(rows[-1][0]["top"] - it["top"]) < 25:
-            rows[-1].append(it)
-        else:
-            rows.append([it])
-    for r in rows:
-        r.sort(key=lambda x: x["left"])
-
-    # 在每行内按 left 排序.
-    # 策略: 先识别 "label 候选" (>=1 汉字字符) 和 "value 候选" (纯数字/英文数字的 token).
-    # value 候选里最长的那个就是"主值" (数字长度 >= 6 字符通常是板号; < 6 是尺寸).
-    # 板号字段期望 14 位数字 (例如 26302650370101); 尺寸字段期望 ≤ 5 位.
-    # 简单版: 把所有 value token 拼起来
     result: dict[str, Any] = {}
-    for row in rows:
-        if not row:
-            continue
-        # 收集 token 类型: 中文 label vs 数字 value
-        labels = []
-        values = []
-        for w in row:
-            t = w["text"]
-            # 纯数字/小数 (>=2 字符) → value
-            import re as _re_inner
-            is_numeric = bool(_re_inner.match(r"^[\d.,]+$", t)) and len(t) >= 2
-            has_chinese = any('一' <= c <= '鿿' for c in t)
-            if has_chinese:
-                labels.append(w)
-            elif is_numeric:
-                values.append(w)
-            # else: 单位 ([mm]: 等) 或 噪声 - 忽略
-
-        if not labels:
-            continue
-
-        # 拼接 label 文字
-        import re as _re
-        label_text = "".join(w["text"] for w in labels)
-        label_clean = _re.sub(r"[\[\]【\]:：\s]", "", label_text)
-        key_cn = None
-        if label_clean in LABEL_KEYS_CN:
-            key_cn = label_clean
-        else:
-            for full in LABEL_KEYS_CN:
-                if len(full) >= 2 and all(c in label_clean for c in full):
-                    key_cn = full
-                    break
-        if not key_cn:
-            continue
-
-        # 拼接 value
-        value = "".join(w["text"] for w in values)
-        value = _re.sub(r"\[[a-z]+\]:?", "", value).strip()
-        try:
-            v = float(value.replace(",", ""))
-            if v == int(v):
-                v = int(v)
-            value = v
-        except (ValueError, TypeError):
-            pass
-        result[LABEL_KEYS_CN[key_cn]] = value
-
+    LABEL_PATTERNS = [
+        (r"板\s*号?\s*[::]?\s*(\d{10,16})", "plate_no"),
+        (r"探伤\s*代?\s*码?\s*[::]?\s*(\S+)", "test_code"),
+        (r"钢\s*种\s*[::]?\s*(\S+)", "grade"),
+        (r"生产\s*日?\s*期?\s*[::]?\s*(\d{8})", "prod_date"),
+        (r"检测\s*日?\s*期?\s*[::]?\s*(\S+)", "test_date"),
+        (r"标\s*准\s*号?\s*[::]?\s*(\S+)", "standard"),
+        (r"厚\s*度?\s*[\[\(]?m*m*[\]\)]?\s*[::]?\s*(\d+\.?\d*)", "thickness"),
+        (r"长\s*度?\s*[\[\(]?m*m*[\]\)]?\s*[::]?\s*(\d+\.?\d*)", "length"),
+        (r"宽\s*度?\s*[\[\(]?m*m*[\]\)]?\s*[::]?\s*(\d+\.?\d*)", "width"),
+    ]
+    for pat, key in LABEL_PATTERNS:
+        m = _re.search(pat, text)
+        if m:
+            val = m.group(1)
+            try:
+                if "." in val: val = float(val)
+                else: val = int(val)
+            except ValueError:
+                pass
+            result[key] = val
     return result
+
