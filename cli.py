@@ -112,7 +112,7 @@ def main():
     p_process.add_argument(
         "-t", "--type", default="zhongban",
         choices=["zhongban", "cscan"],
-        help="文档类型: zhongban (中板厂, 默认) / cscan (中厚板卷厂)",
+        help="文档类型: zhongban (模板一, 默认) / cscan (模板二)",
     )
     p_process.add_argument(
         "--no-split", action="store_true", help="跳过三视图切分"

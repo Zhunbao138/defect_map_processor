@@ -839,7 +839,7 @@ async function refreshTaskList() {
                               : t.status === 'failed' ? '✗ 失败'
                               : t.status === 'processing' ? '⏳ 处理中' + prog
                               : '⏸ 等待中';
-            const typeTag = (t.task_type || 'zhongban') === 'cscan' ? '📡 ' : '';
+            const typeTag = (t.task_type || 'zhongban') === 'cscan' ? '📡 模板二 ' : '模板一 ';
             const file = (t.file || '').split('/').pop();   // 只显示文件名, 不显示完整路径
             return `<option value="${t.task_id}">${escapeHtml(typeTag + statusLabel + count + ' — ' + file)}</option>`;
         }).join('');
