@@ -137,9 +137,12 @@ async function loadRecords() {
             return;
         }
         recordsCache = data.records;  // 缓存
+        currentTaskType = 'zhongban';
         paginationState.page = 1;     // 任务完成后回到第 1 页
         renderRecords();
         document.getElementById('result-section').style.display = 'block';
+        const csec = document.getElementById('cscan-section');
+        if (csec) csec.style.display = 'none';
     } catch (e) {
         console.error('Load records error:', e);
     }
@@ -279,18 +282,29 @@ function getPagedRecords(records) {
     return records.slice(start, start + paginationState.pageSize);
 }
 
+// 当前选中的任务类型 ('zhongban' | 'cscan' | null)
+let currentTaskType = null;
+
 function renderRecords() {
     const displayed = getDisplayedRecords();           // filter + sort
     const paged = getPagedRecords(displayed);          // + paginate
-    document.getElementById('record-count').textContent = displayed.length;
-    const tbody = document.getElementById('record-tbody');
+
+    // 选择目标 section: cscan → cscan-tbody, zhongban → record-tbody
+    const isCscan = currentTaskType === 'cscan';
+    const tbodyId = isCscan ? 'cscan-tbody' : 'record-tbody';
+    const countId = isCscan ? 'cscan-record-count' : 'record-count';
+    const tableId = isCscan ? 'cscan-table' : 'record-table';
+
+    document.getElementById(countId).textContent = displayed.length;
+    const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
     tbody.innerHTML = '';
     paged.forEach(rec => tbody.appendChild(createRecordRow(rec)));
-    updateSortIndicators();
-    renderPagination(displayed.length);                 // 新增: 渲染分页器
-    // 同步表头筛选按钮状态 (有筛选时高亮)
-    document.querySelectorAll('.th-filter-btn').forEach(b => {
+    updateSortIndicators(tableId);
+    renderPagination(displayed.length);
+
+    // 同步表头筛选按钮状态 (有筛选时高亮) — 两个 section 都用 th-filter-btn
+    document.querySelectorAll(`#${tableId} .th-filter-btn`).forEach(b => {
         const c = b.dataset.col;
         const excluded = filterState[c] && filterState[c].excluded.size > 0;
         b.classList.toggle('active', excluded);
@@ -298,8 +312,9 @@ function renderRecords() {
     });
 }
 
-function updateSortIndicators() {
-    document.querySelectorAll('#record-table thead th.sortable').forEach(th => {
+function updateSortIndicators(tableId) {
+    const sel = tableId ? `#${tableId}` : '#record-table';
+    document.querySelectorAll(`${sel} thead th.sortable`).forEach(th => {
         th.classList.remove('sort-asc', 'sort-desc');
         if (th.dataset.col === currentSort.col) {
             th.classList.add(currentSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
@@ -553,18 +568,6 @@ function closeFilterModal() {
 }
 
 function applyFilterModal() {
-    console.log('[filter] apply clicked, currentCol=', currentFilterCol);
-    // 决定是 cscan 还是 zhongban: 看 cscanFilterState 是否有这个列
-    if (currentFilterCol && cscanFilterState[currentFilterCol]) {
-        document.querySelectorAll('#filter-modal-body input[type=checkbox]').forEach(cb => {
-            const col = cb.dataset.col, val = cb.dataset.val;
-            if (cb.checked) cscanFilterState[col].excluded.delete(val);
-            else cscanFilterState[col].excluded.add(val);
-        });
-        closeFilterModal();
-        renderCscanRecords();
-        return;
-    }
     document.querySelectorAll('#filter-modal-body input[type=checkbox]').forEach(cb => {
         const col = cb.dataset.col;
         const val = cb.dataset.val;
@@ -576,7 +579,7 @@ function applyFilterModal() {
         }
     });
     closeFilterModal();
-    paginationState.page = 1;   // 筛选后回到第 1 页
+    paginationState.page = 1;
     renderRecords();
 }
 
@@ -623,22 +626,25 @@ document.addEventListener('change', (e) => {
 });
 
 
-// 表头点击排序
-document.querySelectorAll('#record-table thead th.sortable').forEach(th => {
-    th.style.cursor = 'pointer';
-    th.addEventListener('click', () => {
-        const col = th.dataset.col;
-        if (currentSort.col !== col) {
-            currentSort = { col, dir: 'asc' };
-        } else if (currentSort.dir === 'asc') {
-            currentSort.dir = 'desc';
-        } else {
-            currentSort = { col: null, dir: 'none' };
-        }
-        paginationState.page = 1;   // 排序后回到第 1 页
-        renderRecords();
+// 表头点击排序 (zhongban + cscan 都用同一套)
+function bindSortHandlers() {
+    document.querySelectorAll('#record-table thead th.sortable, #cscan-table thead th.sortable').forEach(th => {
+        th.style.cursor = 'pointer';
+        th.addEventListener('click', () => {
+            const col = th.dataset.col;
+            if (currentSort.col !== col) {
+                currentSort = { col, dir: 'asc' };
+            } else if (currentSort.dir === 'asc') {
+                currentSort.dir = 'desc';
+            } else {
+                currentSort = { col: null, dir: 'none' };
+            }
+            paginationState.page = 1;
+            renderRecords();
+        });
     });
-});
+}
+bindSortHandlers();
 
 // ===== 编辑缺陷参数弹窗 =====
 let currentEditRow = null;
@@ -822,11 +828,16 @@ async function selectTask(taskId) {
     if (taskType === 'cscan') {
         loadCscanRecords(taskId);
     } else {
+        loadCscanRecords(null); // ensure cscan state is cleared
         loadRecords();
     }
 }
 
 async function loadCscanRecords(taskId) {
+    // 统一 cscan 数据到 recordsCache, 复用 renderRecords 的 filter/sort/pagination
+    if (!taskId) {
+        return;
+    }
     try {
         const res = await fetch(`/api/cscan_records/${taskId}`);
         if (!res.ok) {
@@ -834,262 +845,31 @@ async function loadCscanRecords(taskId) {
             return;
         }
         const data = await res.json();
-        cscanRecordsCache = data.records || [];
-        rebuildCscanFilterDistinct();
-        renderCscanRecords();
-        const sec = document.getElementById('cscan-section');
-        if (sec) sec.style.display = 'block';
+        // cscan 记录直接写入 recordsCache, 共享所有 filter/sort/pagination 逻辑
+        recordsCache = (data.records || []).map(r => {
+            // 确保 cscan 记录有 zhongban 的 6 个基础字段, 让 renderRecords 不报错
+            r['序号'] = r['序号'] ?? r.row_index ?? '';
+            r['生产厂'] = r['生产厂'] ?? '';
+            r['钢板号'] = r['钢板号'] ?? '';
+            r['钢种'] = r['钢种'] ?? '';
+            r['类别'] = r['类别'] ?? '';
+            r['缺陷分析'] = r['缺陷分析'] ?? '';
+            return r;
+        });
+        currentTaskType = 'cscan';
+        paginationState.page = 1;
+        rebuildFilterDistinct();
+        renderRecords();
+        document.getElementById('result-section').style.display = 'none';
+        const csec = document.getElementById('cscan-section');
+        if (csec) csec.style.display = 'block';
     } catch (e) {
         console.error('Load cscan error:', e);
     }
 }
 
-function renderCscanRecords(records) {
-    const displayed = getDisplayedCscanRecords();
-    document.getElementById('cscan-record-count').textContent = displayed.length;
-    const tbody = document.getElementById('cscan-tbody');
-    tbody.innerHTML = '';
-    displayed.forEach(rec => {
-        const tr = document.createElement('tr');
-        tr.dataset.searchText = [
-            rec['钢板号'], rec['生产厂'], rec['钢种'], rec['类别'], rec['缺陷分析']
-        ].join(' ').toLowerCase();
-        const defectCount = (rec['缺陷表格'] || []).length;
-        tr.innerHTML = `
-            <td class="col-index">#${escapeHtml(rec['序号'] || String(rec.row_index))}</td>
-            <td class="col-factory">${escapeHtml(rec['生产厂'] || '-')}</td>
-            <td class="col-plate">${escapeHtml(rec['钢板号'] || '-')}</td>
-            <td class="col-grade">${escapeHtml(rec['钢种'] || '-')}</td>
-            <td><span class="col-category">${escapeHtml(rec['类别'] || '-')}</span></td>
-            <td class="col-defect" title="${escapeAttr(rec['缺陷分析'] || '')}">${escapeHtml(rec['缺陷分析'] || '-')}</td>
-            <td>${rec['厚度'] ?? '-'} mm</td>
-            <td>${rec['长度'] ?? '-'} × ${rec['宽度'] ?? '-'}</td>
-            <td>${defectCount}</td>
-        `;
-        tr.style.cursor = 'pointer';
-        tr.addEventListener('click', () => openCscanDetail(rec));
-        tbody.appendChild(tr);
-    });
-    updateCscanFilterButtons();
-    updateSortIndicatorsForCscan();
-}
-
-let currentCscanSort = { col: null, dir: 'none' };
-const CSCAN_FILTER_COLS = ['生产厂', '钢板号', '钢种', '类别', '缺陷分析'];
-const cscanFilterState = {};
-let cscanRecordsCache = [];
-
-function getDisplayedCscanRecords() {
-    let arr = cscanRecordsCache.slice();
-    for (const col of CSCAN_FILTER_COLS) {
-        const st = cscanFilterState[col];
-        if (!st || st.excluded.size === 0) continue;
-        arr = arr.filter(rec => {
-            const v = rec[col];
-            if (v == null || v === '') return true;
-            return !st.excluded.has(String(v));
-        });
-    }
-    if (currentCscanSort.col && currentCscanSort.dir !== 'none') {
-        const col = currentCscanSort.col;
-        const dir = currentCscanSort.dir === 'asc' ? 1 : -1;
-        arr.sort((a, b) => {
-            let va = a[col], vb = b[col];
-            if (va == null) va = '';
-            if (vb == null) vb = '';
-            if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
-            va = String(va).toLowerCase();
-            vb = String(vb).toLowerCase();
-            const na = parseFloat(va), nb = parseFloat(vb);
-            if (!isNaN(na) && !isNaN(nb) && String(na) === va && String(nb) === vb) return (na - nb) * dir;
-            return va.localeCompare(vb, 'zh-CN') * dir;
-        });
-    }
-    return arr;
-}
-
-function rebuildCscanFilterDistinct() {
-    for (const col of CSCAN_FILTER_COLS) {
-        const set = new Set();
-        for (const rec of cscanRecordsCache) {
-            const v = rec[col];
-            if (v != null && v !== '') set.add(String(v));
-        }
-        const sorted = Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'));
-        if (!cscanFilterState[col]) cscanFilterState[col] = { excluded: new Set(), distinct: [] };
-        cscanFilterState[col].distinct = sorted;
-        const distSet = new Set(sorted);
-        for (const e of Array.from(cscanFilterState[col].excluded)) {
-            if (!distSet.has(e)) cscanFilterState[col].excluded.delete(e);
-        }
-    }
-}
-
-function updateSortIndicatorsForCscan() {
-    document.querySelectorAll('#cscan-table thead th.sortable').forEach(th => {
-        th.classList.remove('sort-asc', 'sort-desc');
-        if (th.dataset.col === currentCscanSort.col) {
-            th.classList.add(currentCscanSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
-        }
-    });
-}
-
-function updateCscanFilterButtons() {
-    document.querySelectorAll('.cscan-filter-btn').forEach(b => {
-        const c = b.dataset.col;
-        const excluded = cscanFilterState[c] && cscanFilterState[c].excluded.size > 0;
-        b.classList.toggle('active', excluded);
-        b.title = excluded ? `${c} (${cscanFilterState[c].excluded.size} 项已筛除)` : `筛选本列`;
-    });
-}
-
-// cscan 表头排序
-document.querySelectorAll('#cscan-table thead th.sortable').forEach(th => {
-    th.style.cursor = 'pointer';
-    th.addEventListener('click', () => {
-        const col = th.dataset.col;
-        if (currentCscanSort.col !== col) {
-            currentCscanSort = { col, dir: 'asc' };
-        } else if (currentCscanSort.dir === 'asc') {
-            currentCscanSort.dir = 'desc';
-        } else {
-            currentCscanSort = { col: null, dir: 'none' };
-        }
-        renderCscanRecords();
-    });
-});
-
-// cscan 表头筛选按钮 — 复用 zhongban 现有的 filter-modal
-document.querySelectorAll('.cscan-filter-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        currentFilterCol = btn.dataset.col;
-        rebuildCscanFilterDistinct();
-        const st = cscanFilterState[currentFilterCol];
-        const body = document.getElementById('filter-modal-body');
-        body.innerHTML = '';
-        document.getElementById('filter-modal-title').textContent = `筛选: ${currentFilterCol} (${st.distinct.length})`;
-        if (st.distinct.length === 0) {
-            body.innerHTML = '<div class="filter-empty">无值</div>';
-        } else {
-            const group = document.createElement('div');
-            group.className = 'filter-group';
-            for (const val of st.distinct) {
-                const checked = !st.excluded.has(val);
-                const lbl = document.createElement('label');
-                lbl.className = 'filter-item';
-                lbl.innerHTML = `<input type="checkbox" data-col="${escapeAttr(currentFilterCol)}" data-val="${escapeAttr(val)}" ${checked ? 'checked' : ''}><span>${escapeHtml(val)}</span>`;
-                group.appendChild(lbl);
-            }
-            body.appendChild(group);
-        }
-        updateFilterSummary();
-        document.getElementById('filter-modal').classList.add('active');
-    });
-});
-
-function openCscanDetail(rec) {
-    const modal = document.getElementById('cscan-detail-modal');
-    const body = document.getElementById('cscan-detail-body');
-    if (!modal || !body) return;
-
-    // 8 张子图 (沿用 zhongban 详情弹窗的 .detail-top + .cscan-images-grid 布局)
-    const imgBlocks = (['F', 'G']).flatMap(prefix => {
-        const order = [
-            ['table', '13 列缺陷表格'],
-            ['ascan', 'A 扫'],
-            ['cscan', 'C 扫'],
-            ['board', '板信息'],
-        ];
-        const header = `<div class="row-divider">${prefix} 列原图 (${prefix === 'F' ? '图-1' : '图-2'})</div>`;
-        const cells = order.map(([name, label]) => {
-            const path = rec[`${prefix}_${name}`];
-            const url = path ? `/api/image/${currentTaskId}/${relPath(path)}` : '';
-            return `
-                <div class="image-block">
-                    <div class="image-label">${label} (${prefix}_${name})</div>
-                    ${url ? `<a href="${escapeAttr(url)}" target="_blank"><img src="${escapeAttr(url)}" loading="lazy"></a>` : '<div style="color:#999;padding:2rem 0;text-align:center">无图</div>'}
-                </div>
-            `;
-        }).join('');
-        return header + cells;
-    }).join('');
-
-    const defects = rec['缺陷表格'] || [];
-    const tableRows = defects.length === 0
-        ? '<tr><td colspan="13" style="text-align:center;color:#999">无 OCR 数据</td></tr>'
-        : defects.map(t => `
-            <tr>
-                <td>${t['序号'] ?? ''}</td>
-                <td>${t['X起始'] ?? ''}</td>
-                <td>${t['X终止'] ?? ''}</td>
-                <td>${t['X中点'] ?? ''}</td>
-                <td>${t['X长度'] ?? ''}</td>
-                <td>${t['Y起始'] ?? ''}</td>
-                <td>${t['Y终止'] ?? ''}</td>
-                <td>${t['Y中点'] ?? ''}</td>
-                <td>${t['Y长度'] ?? ''}</td>
-                <td>${t['面积'] ?? ''}</td>
-                <td>${t['类型'] ?? ''}</td>
-                <td>${t['深度'] ?? ''}</td>
-                <td>${t['幅值'] ?? ''}</td>
-            </tr>
-        `).join('');
-
-    body.innerHTML = `
-        <div class="detail-top">
-            <div class="detail-fields">
-                <div class="detail-field"><span class="df-label">序号</span><span class="df-value">#${escapeHtml(rec['序号'] || String(rec.row_index))}</span></div>
-                <div class="detail-field"><span class="df-label">钢板号</span><span class="df-value">${escapeHtml(rec['钢板号'] || '-')}</span></div>
-                <div class="detail-field"><span class="df-label">生产厂</span><span class="df-value">${escapeHtml(rec['生产厂'] || '-')}</span></div>
-                <div class="detail-field"><span class="df-label">钢种</span><span class="df-value">${escapeHtml(rec['钢种'] || '-')}</span></div>
-                <div class="detail-field"><span class="df-label">类别</span><span class="df-value">${escapeHtml(rec['类别'] || '-')}</span></div>
-                <div class="detail-field"><span class="df-label">缺陷分析</span><span class="df-value">${escapeHtml(rec['缺陷分析'] || '-')}</span></div>
-                <div class="detail-field"><span class="df-label">板号 (OCR)</span><span class="df-value">${rec['板号'] ?? '-'}</span></div>
-                <div class="detail-field"><span class="df-label">厚度/长度/宽度</span><span class="df-value">${rec['厚度'] ?? '-'} mm / ${rec['长度'] ?? '-'} mm / ${rec['宽度'] ?? '-'} mm</span></div>
-            </div>
-            <button type="button" class="modal-close-in" onclick="closeCscanDetail()">×</button>
-        </div>
-
-        <div class="cscan-images-grid">${imgBlocks}</div>
-
-        <h4 style="margin:1rem 0 0.4rem;color:#2d3748">📋 缺陷表格 (${defects.length} 行)</h4>
-        <div style="overflow-x:auto">
-        <table class="cscan-defect-table">
-            <thead>
-                <tr>
-                    <th>序号</th><th>X起始</th><th>X终止</th><th>X中点</th><th>X长度</th>
-                    <th>Y起始</th><th>Y终止</th><th>Y中点</th><th>Y长度</th>
-                    <th>面积</th><th>类型</th><th>深度</th><th>幅值</th>
-                </tr>
-            </thead>
-            <tbody>${tableRows}</tbody>
-        </table>
-        </div>
-    `;
-    modal.classList.add('active');
-}
-
-function closeCscanDetail() {
-    const modal = document.getElementById('cscan-detail-modal');
-    if (modal) modal.classList.remove('active');
-}
-
-// 点击 cscan-detail 背景关闭
-document.getElementById('cscan-detail-modal')?.addEventListener('click', (e) => {
-    if (e.target.id === 'cscan-detail-modal') closeCscanDetail();
-});
-
-// cscan JSON 下载
-document.getElementById('cscan-download-json')?.addEventListener('click', () => {
-    if (!currentTaskId) return;
-    window.location.href = `/api/image/${currentTaskId}/cscan_records.json`;
-});
-
-// 任务下拉的 change 事件 (用户直接换 task 时)
-document.getElementById('task-list')?.addEventListener('change', (e) => {
-    selectTask(e.target.value);
-});
+// ---- cscan 废弃代码 (旧 renderCscanRecords / cscanFilterState / cscan Sort 逻辑) ----
+// (已删除 ~120 行旧 cscan 渲染/排序/筛选代码, 统一到 recordsCache+renderRecords)
 
 // ===== 下载 (按当前 filter+sort) =====
 // JSON 导出 (前端生成): 文本 + OCR 参数 + warnings
