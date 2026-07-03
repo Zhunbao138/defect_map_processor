@@ -47,6 +47,8 @@ class ProcessConfig:
     # 文档类型: "zhongban" (中板厂, 默认) 或 "cscan" (中厚板卷厂).
     # cscan 走独立流水线 (切图 + JSON + 独立 SQLite 表), 不做传统 6 列 OCR/切图
     task_type: str = "zhongban"
+    # 识别方式: "ocr" (Tesseract) 或 "llm" (本地大模型)
+    recognition: str = "ocr"
 
 
 @dataclass
@@ -479,7 +481,11 @@ class ProcessPipeline:
 
             # ========== 阶段 2-3: OCR (缺陷表格 + 板信息) ==========
             report("ocr", 0.0, "OCR 缺陷表格 + 板信息...")
-            from .cscan_ocr import ocr_defect_table, ocr_board_info
+            if self.config.recognition == "llm":
+                from .llm_ocr import llm_ocr_defect_table as ocr_defect_table
+                from .llm_ocr import llm_ocr_board_info as ocr_board_info
+            else:
+                from .cscan_ocr import ocr_defect_table, ocr_board_info
             ocr_table_map: dict[int, dict] = {}  # {row_idx: {"F": [...], "G": [...]}}
             ocr_board_map: dict[int, dict] = {}
             total = max(total_rows, 1)

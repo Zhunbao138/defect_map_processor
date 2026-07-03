@@ -54,18 +54,19 @@
                             </label>
                         </fieldset>
 
-                        <label class="checkbox-label" id="zhongban-only-1">
-                            <input type="checkbox" id="enable-ocr" checked>
-                            启用 OCR 识别
-                        </label>
-                        <label class="checkbox-label" id="zhongban-only-2">
-                            <input type="checkbox" id="enable-split" checked>
-                            启用三视图切分
-                        </label>
-                        <label class="checkbox-label" id="zhongban-only-3">
-                            <input type="checkbox" id="ocr-gpu">
-                            OCR GPU 加速
-                        </label>
+                        <fieldset class="radio-group">
+                            <legend>识别方式</legend>
+                            <label class="radio-label">
+                                <input type="radio" name="recognition" value="ocr" checked>
+                                <span class="doc-type-tag">OCR</span>
+                                <span class="doc-type-hint">Tesseract 本地识别</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="recognition" value="llm">
+                                <span class="doc-type-tag">大模型</span>
+                                <span class="doc-type-hint">本地 LLM 识别 (127.0.0.1:8080)</span>
+                            </label>
+                        </fieldset>
                     </div>
 
                     <div class="form-actions">

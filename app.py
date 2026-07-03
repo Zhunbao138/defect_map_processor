@@ -212,24 +212,17 @@ def register_routes(app: Flask):
             }
 
         # 后台线程处理
-        enable_ocr = request.form.get("enable_ocr", "true").lower() == "true"
-        enable_split = request.form.get("enable_split", "true").lower() == "true"
-        use_gpu = request.form.get("ocr_gpu", "false").lower() == "true"
+        recognition = request.form.get("recognition", "ocr")
         task_type = request.form.get("task_type", "zhongban").lower()
         if task_type not in ("zhongban", "cscan"):
             task_type = "zhongban"
-
-        # cscan 流程不需要 6 列 OCR/切图
-        if task_type == "cscan":
-            enable_ocr = False
-            enable_split = False
 
         with TASK_LOCK:
             TASKS[task_id]["task_type"] = task_type
 
         thread = threading.Thread(
             target=run_task,
-            args=(task_id, str(saved_path), str(output_dir), enable_ocr, enable_split, use_gpu, task_type),
+            args=(task_id, str(saved_path), str(output_dir), recognition, task_type),
             daemon=True,
         )
         thread.start()
@@ -270,13 +263,11 @@ def register_routes(app: Flask):
                 "created_at": time.time(),
             }
 
-        enable_ocr = data.get("enable_ocr", True)
-        enable_split = data.get("enable_split", True)
-        use_gpu = data.get("ocr_gpu", True)  # 默认开 GPU
+        recognition = data.get("recognition", "ocr")
 
         thread = threading.Thread(
             target=run_task,
-            args=(task_id, file_path, str(output_dir), enable_ocr, enable_split, use_gpu),
+            args=(task_id, file_path, str(output_dir), recognition, "zhongban"),
             daemon=True,
         )
         thread.start()
@@ -635,9 +626,7 @@ def run_task(
     task_id: str,
     file_path: str,
     output_dir: str,
-    enable_ocr: bool,
-    enable_split: bool,
-    use_gpu: bool,
+    recognition: str = "ocr",
     task_type: str = "zhongban",
 ):
     """后台执行处理任务。"""
@@ -666,10 +655,10 @@ def run_task(
         config = ProcessConfig(
             file_path=file_path,
             output_dir=output_dir,
-            enable_ocr=enable_ocr,
-            enable_split=enable_split,
-            ocr_gpu=use_gpu,
+            enable_ocr=(task_type == "zhongban"),
+            enable_split=(task_type == "zhongban"),
             task_type=task_type,
+            recognition=recognition,
         )
         pipeline = ProcessPipeline(config)
         pipeline.cancel_event = cancel_event

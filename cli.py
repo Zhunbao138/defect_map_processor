@@ -44,7 +44,7 @@ def cmd_process(args):
         sheet_name=args.sheet,
         enable_ocr=not args.no_ocr,
         enable_split=not args.no_split,
-        ocr_gpu=args.gpu,
+        recognition=getattr(args, 'recognition', 'ocr'),
         ocr_languages=tuple(args.lang.split(",")) if args.lang else ("en", "ch_sim"),
         task_type=args.type,
     )
