@@ -504,8 +504,10 @@ function openRecordDetail(rec) {
             if (e.target === detailModalEl) closeRecordDetail();
         });
     }
+    const isCscan = !!(rec['缺陷表格'] || rec['F_ascan']);
     const body = document.getElementById('record-detail-body');
-    body.innerHTML = `
+
+    const topFields = `
         <div class="detail-top">
             <div class="detail-fields">
                 <div class="detail-field"><span class="df-label">序号</span><span class="df-value">#${rec['序号'] || rec['row_index']}</span></div>
@@ -516,10 +518,64 @@ function openRecordDetail(rec) {
                 <div class="detail-field"><span class="df-label">缺陷分析</span><span class="df-value">${escapeHtml(rec['缺陷分析'] || '-')}</span></div>
             </div>
             <button type="button" class="modal-close-in" onclick="closeRecordDetail()">×</button>
-        </div>
-        ${buildRecordCardHTML(rec)}
-    `;
+        </div>`;
+
+    body.innerHTML = topFields + (isCscan ? buildCscanDetailHTML(rec) : buildRecordCardHTML(rec));
     detailModalEl.classList.add('active');
+}
+
+// cscan 详情: 板信息 + 8 张子图 + 13 列缺陷表格
+function buildCscanDetailHTML(rec) {
+    const imgBase = `/api/image/${currentTaskId}/`;
+    function ci(key) {  // cscan image helper
+        const p = rec[key];
+        if (!p) return null;
+        // p is e.g. "/home/.../output/f72f61d1/images/F_table-007.png"
+        // relPath strips the output/task_id/ prefix
+        return imgBase + relPath(p);
+    }
+    function cellImg(src, label) {
+        if (!src) return '<div class="image-item"><div class="image-missing">-</div></div>';
+        return `<div class="image-item" onclick="showImage('${escapeAttr(src)}')">
+            <img src="${src}" alt="${label}" loading="lazy"><div class="image-label">${label}</div></div>`;
+    }
+    // 8 张子图: F table/ascan/cscan/board + G table/ascan/cscan/board
+    const imgsF = [
+        {key:'F_table', label:'F表格'}, {key:'F_ascan', label:'F-A扫'}, {key:'F_cscan', label:'F-C扫'}, {key:'F_board', label:'F板信息'}
+    ].map(k => cellImg(ci(k.key), k.label)).join('');
+    const imgsG = [
+        {key:'G_table', label:'G表格'}, {key:'G_ascan', label:'G-A扫'}, {key:'G_cscan', label:'G-C扫'}, {key:'G_board', label:'G板信息'}
+    ].map(k => cellImg(ci(k.key), k.label)).join('');
+
+    // 13 列缺陷表格
+    const defectTable = rec['缺陷表格'] || [];
+    let tableHTML = '';
+    if (defectTable.length > 0) {
+        const cols = ['序号','X起始','X终止','X中点','X长度','Y起始','Y终止','Y中点','Y长度','面积','类型','深度','幅值'];
+        tableHTML = `<h4>📊 缺陷表格 (${defectTable.length} 行)</h4>
+        <div style="overflow-x:auto"><table class="cscan-defect-table"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>
+        ${defectTable.map(row => '<tr>' + cols.map(c => `<td>${row[c] ?? '-'}</td>`).join('') + '</tr>').join('')}
+        </tbody></table></div>`;
+    } else {
+        tableHTML = `<p class="empty-params">无缺陷表格数据</p>`;
+    }
+
+    return `
+        <div class="record-body">
+            <div class="cscan-info-bar">
+                ${rec['厚度'] ? `<span class="cscan-info-tag">厚度: ${escapeHtml(rec['厚度'])} mm</span>` : ''}
+                ${rec['长度'] ? `<span class="cscan-info-tag">长度: ${escapeHtml(rec['长度'])} mm</span>` : ''}
+                ${rec['宽度'] ? `<span class="cscan-info-tag">宽度: ${escapeHtml(rec['宽度'])} mm</span>` : ''}
+                ${rec['板号'] ? `<span class="cscan-info-tag">板号: ${escapeHtml(rec['板号'])}</span>` : ''}
+            </div>
+            <div class="record-images">
+                <div class="image-group"><div class="image-group-title">F 列子图</div>
+                    <div class="image-grid">${imgsF}</div></div>
+                <div class="image-group"><div class="image-group-title">G 列子图</div>
+                    <div class="image-grid">${imgsG}</div></div>
+            </div>
+            ${tableHTML}
+        </div>`;
 }
 
 function closeRecordDetail() {
