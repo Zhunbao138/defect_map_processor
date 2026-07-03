@@ -213,19 +213,9 @@ function getDisplayedRecords() {
 }
 
 function renderPagination(displayedCount) {
-    // cscan 使用动态创建的 pagination bar, zhongban 用 #pagination-bar
     const isCscan = currentTaskType === 'cscan';
     const barId = isCscan ? 'cscan-pagination-bar' : 'pagination-bar';
-    let bar = document.getElementById(barId);
-    if (!bar && isCscan) {
-        const tbl = document.getElementById('cscan-table');
-        if (tbl) {
-            bar = document.createElement('div');
-            bar.id = barId;
-            bar.className = 'pagination-bar';
-            tbl.parentNode.insertBefore(bar, tbl.nextSibling);
-        }
-    }
+    const bar = document.getElementById(barId);
     if (!bar) return;
 
     // 边界: 0 条 → 隐藏整个分页器
@@ -245,12 +235,12 @@ function renderPagination(displayedCount) {
     const isLast = paginationState.page >= totalPages;
 
     bar.innerHTML = `
-        <button type="button" class="btn-secondary page-btn" id="page-prev" ${isFirst ? 'disabled' : ''}>« 上一页</button>
-        <span class="page-indicator">第 <span class="page-current">${paginationState.page}</span> / ${totalPages} 页</span>
-        <button type="button" class="btn-secondary page-btn" id="page-next" ${isLast ? 'disabled' : ''}>下一页 »</button>
+        <button type="button" class="btn-secondary page-btn page-prev-btn" ${isFirst ? 'disabled' : ''}>« 上一页</button>
+        <span class="page-indicator"><span class="page-current">${paginationState.page}</span> / ${totalPages} 页</span>
+        <button type="button" class="btn-secondary page-btn page-next-btn" ${isLast ? 'disabled' : ''}>下一页 »</button>
         <label class="page-size-label">
             每页
-            <select class="page-size-select" id="page-size-select">
+            <select class="page-size-select page-size-sel">
                 <option value="10" ${paginationState.pageSize === 10 ? 'selected' : ''}>10</option>
                 <option value="20" ${paginationState.pageSize === 20 ? 'selected' : ''}>20</option>
                 <option value="50" ${paginationState.pageSize === 50 ? 'selected' : ''}>50</option>
@@ -260,26 +250,18 @@ function renderPagination(displayedCount) {
         </label>
     `;
 
-    // 翻页按钮
-    document.getElementById('page-prev')?.addEventListener('click', () => {
-        if (paginationState.page > 1) {
-            paginationState.page -= 1;
-            renderRecords();
-        }
+    // 翻页按钮 (用 class 选择, 避免两个 section 的 id 冲突)
+    bar.querySelector('.page-prev-btn')?.addEventListener('click', () => {
+        if (paginationState.page > 1) { paginationState.page -= 1; renderRecords(); }
     });
-    document.getElementById('page-next')?.addEventListener('click', () => {
-        if (paginationState.page < totalPages) {
-            paginationState.page += 1;
-            renderRecords();
-        }
+    bar.querySelector('.page-next-btn')?.addEventListener('click', () => {
+        if (paginationState.page < totalPages) { paginationState.page += 1; renderRecords(); }
     });
-
-    // pageSize 变化
-    document.getElementById('page-size-select')?.addEventListener('change', (e) => {
+    bar.querySelector('.page-size-sel')?.addEventListener('change', (e) => {
         const newSize = parseInt(e.target.value, 10);
         if ([10, 20, 50, 100].includes(newSize)) {
             paginationState.pageSize = newSize;
-            paginationState.page = 1;   // 改 pageSize 必须重置到第 1 页
+            paginationState.page = 1;
             renderRecords();
         }
     });
