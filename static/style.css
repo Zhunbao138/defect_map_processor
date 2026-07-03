@@ -1190,17 +1190,12 @@ body.cscan-mode #zhongban-only-3 { display: none; }
     border-color: #667eea;
 }
 
-/* ===== cscan 结果区 ===== */
-.cscan-section {
-    background: white;
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-    margin: 1rem auto;
-    max-width: 1200px;
-}
-.cscan-section .record-table th { color: #4a5568; }
-.cscan-section .record-table td { vertical-align: middle; }
+/* ===== cscan 结果区 (沿用 result-section, 加些定制) ===== */
+#cscan-section.record-table th { color: #4a5568; }
+#cscan-section .record-table td { vertical-align: middle; }
+#cscan-section .col-cscan-thickness, #cscan-section .col-cscan-len, #cscan-section .col-cscan-rowcount { color: #4a5568; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+
+/* 沿用 zhongban 的表头筛选 / 排序样式 (复用 .col-* 和 .record-table 通用规则) */
 
 /* cscan 详情: 8 张子图网格 (F×4 + G×4 = 2 行 × 4 列) */
 .cscan-images-grid {

@@ -148,10 +148,10 @@
             </div>
         </section>
 
-        <!-- ========== cscan 结果区 ========== -->
-        <section class="cscan-section" id="cscan-section" style="display:none">
+        <!-- ========== cscan 结果区 (沿用 zhongban 的 result-section 样式) ========== -->
+        <section class="result-section" id="cscan-section" style="display:none">
             <div class="result-header">
-                <h2>📡 中厚板卷厂 <span id="cscan-record-count">(0)</span></h2>
+                <h2>📡 缺陷记录 (<span id="cscan-record-count">0</span>)</h2>
                 <div class="result-actions">
                     <button class="btn-secondary" id="cscan-download-json">下载 JSON</button>
                 </div>
@@ -160,15 +160,33 @@
             <table class="record-table" id="cscan-table">
                 <thead>
                     <tr>
-                        <th>序号</th>
-                        <th>钢板号</th>
-                        <th>钢种</th>
-                        <th>类别</th>
-                        <th>厚度[mm]</th>
-                        <th>长度[mm]</th>
-                        <th>宽度[mm]</th>
-                        <th>缺陷表格行数</th>
-                        <th>详情</th>
+                        <th class="col-index sortable" data-col="序号">
+                            <span class="th-content"># <span class="sort-arrow"></span></span>
+                            <button type="button" class="cscan-filter-btn" data-col="序号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-factory sortable" data-col="生产厂">
+                            <span class="th-content">生产厂 <span class="sort-arrow"></span></span>
+                            <button type="button" class="cscan-filter-btn" data-col="生产厂" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-plate sortable" data-col="钢板号">
+                            <span class="th-content">钢板号 <span class="sort-arrow"></span></span>
+                            <button type="button" class="cscan-filter-btn" data-col="钢板号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-grade sortable" data-col="钢种">
+                            <span class="th-content">钢种 <span class="sort-arrow"></span></span>
+                            <button type="button" class="cscan-filter-btn" data-col="钢种" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="sortable" data-col="类别">
+                            <span class="th-content">类别 <span class="sort-arrow"></span></span>
+                            <button type="button" class="cscan-filter-btn" data-col="类别" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-defect sortable" data-col="缺陷分析">
+                            <span class="th-content">缺陷分析 <span class="sort-arrow"></span></span>
+                            <button type="button" class="cscan-filter-btn" data-col="缺陷分析" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-cscan-thickness">厚度[mm]</th>
+                        <th class="col-cscan-len">长度×宽度</th>
+                        <th class="col-cscan-rowcount">缺陷表行数</th>
                     </tr>
                 </thead>
                 <tbody id="cscan-tbody">
@@ -177,10 +195,9 @@
             </table>
         </section>
 
-        <!-- ========== cscan 详情弹窗 ========== -->
-        <div class="modal" id="cscan-detail-modal">
+        <!-- ========== cscan 详情弹窗 (沿用 zhongban 的 record-detail-modal 样式) ========== -->
+        <div class="modal record-detail-modal" id="cscan-detail-modal">
             <div class="modal-content" onclick="event.stopPropagation()">
-                <button type="button" class="modal-close" onclick="closeCscanDetail()">×</button>
                 <div id="cscan-detail-body"></div>
             </div>
         </div>

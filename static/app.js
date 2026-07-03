@@ -823,7 +823,9 @@ async function loadCscanRecords(taskId) {
             return;
         }
         const data = await res.json();
-        renderCscanRecords(data.records || []);
+        cscanRecordsCache = data.records || [];
+        rebuildCscanFilterDistinct();
+        renderCscanRecords();
         const sec = document.getElementById('cscan-section');
         if (sec) sec.style.display = 'block';
     } catch (e) {
@@ -832,34 +834,155 @@ async function loadCscanRecords(taskId) {
 }
 
 function renderCscanRecords(records) {
-    document.getElementById('cscan-record-count').textContent = `(${records.length})`;
+    const displayed = getDisplayedCscanRecords();
+    document.getElementById('cscan-record-count').textContent = displayed.length;
     const tbody = document.getElementById('cscan-tbody');
     tbody.innerHTML = '';
-    records.forEach(rec => {
+    displayed.forEach(rec => {
         const tr = document.createElement('tr');
-        tr.dataset.row = rec.row_index;
+        tr.dataset.searchText = [
+            rec['钢板号'], rec['生产厂'], rec['钢种'], rec['类别'], rec['缺陷分析']
+        ].join(' ').toLowerCase();
         const defectCount = (rec['缺陷表格'] || []).length;
         tr.innerHTML = `
-            <td>${escapeHtml(rec['序号'] || '')}</td>
-            <td>${escapeHtml(rec['钢板号'] || '')}</td>
-            <td>${escapeHtml(rec['钢种'] || '')}</td>
-            <td>${escapeHtml(rec['类别'] || '')}</td>
-            <td>${rec['厚度'] ?? '-'}</td>
-            <td>${rec['长度'] ?? '-'}</td>
-            <td>${rec['宽度'] ?? '-'}</td>
+            <td class="col-index">#${escapeHtml(rec['序号'] || String(rec.row_index))}</td>
+            <td class="col-factory">${escapeHtml(rec['生产厂'] || '-')}</td>
+            <td class="col-plate">${escapeHtml(rec['钢板号'] || '-')}</td>
+            <td class="col-grade">${escapeHtml(rec['钢种'] || '-')}</td>
+            <td><span class="col-category">${escapeHtml(rec['类别'] || '-')}</span></td>
+            <td class="col-defect" title="${escapeAttr(rec['缺陷分析'] || '')}">${escapeHtml(rec['缺陷分析'] || '-')}</td>
+            <td>${rec['厚度'] ?? '-'} mm</td>
+            <td>${rec['长度'] ?? '-'} × ${rec['宽度'] ?? '-'}</td>
             <td>${defectCount}</td>
-            <td><button class="btn-secondary btn-sm" data-action="open">查看</button></td>
         `;
-        tr.querySelector('button').addEventListener('click', () => openCscanDetail(rec));
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', () => openCscanDetail(rec));
         tbody.appendChild(tr);
     });
+    updateCscanFilterButtons();
+    updateSortIndicatorsForCscan();
 }
+
+let currentCscanSort = { col: null, dir: 'none' };
+const CSCAN_FILTER_COLS = ['生产厂', '钢板号', '钢种', '类别', '缺陷分析'];
+const cscanFilterState = {};
+let cscanRecordsCache = [];
+
+function getDisplayedCscanRecords() {
+    let arr = cscanRecordsCache.slice();
+    for (const col of CSCAN_FILTER_COLS) {
+        const st = cscanFilterState[col];
+        if (!st || st.excluded.size === 0) continue;
+        arr = arr.filter(rec => {
+            const v = rec[col];
+            if (v == null || v === '') return true;
+            return !st.excluded.has(String(v));
+        });
+    }
+    if (currentCscanSort.col && currentCscanSort.dir !== 'none') {
+        const col = currentCscanSort.col;
+        const dir = currentCscanSort.dir === 'asc' ? 1 : -1;
+        arr.sort((a, b) => {
+            let va = a[col], vb = b[col];
+            if (va == null) va = '';
+            if (vb == null) vb = '';
+            if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+            va = String(va).toLowerCase();
+            vb = String(vb).toLowerCase();
+            const na = parseFloat(va), nb = parseFloat(vb);
+            if (!isNaN(na) && !isNaN(nb) && String(na) === va && String(nb) === vb) return (na - nb) * dir;
+            return va.localeCompare(vb, 'zh-CN') * dir;
+        });
+    }
+    return arr;
+}
+
+function rebuildCscanFilterDistinct() {
+    for (const col of CSCAN_FILTER_COLS) {
+        const set = new Set();
+        for (const rec of cscanRecordsCache) {
+            const v = rec[col];
+            if (v != null && v !== '') set.add(String(v));
+        }
+        const sorted = Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'));
+        if (!cscanFilterState[col]) cscanFilterState[col] = { excluded: new Set(), distinct: [] };
+        cscanFilterState[col].distinct = sorted;
+        const distSet = new Set(sorted);
+        for (const e of Array.from(cscanFilterState[col].excluded)) {
+            if (!distSet.has(e)) cscanFilterState[col].excluded.delete(e);
+        }
+    }
+}
+
+function updateSortIndicatorsForCscan() {
+    document.querySelectorAll('#cscan-table thead th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.col === currentCscanSort.col) {
+            th.classList.add(currentCscanSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
+
+function updateCscanFilterButtons() {
+    document.querySelectorAll('.cscan-filter-btn').forEach(b => {
+        const c = b.dataset.col;
+        const excluded = cscanFilterState[c] && cscanFilterState[c].excluded.size > 0;
+        b.classList.toggle('active', excluded);
+        b.title = excluded ? `${c} (${cscanFilterState[c].excluded.size} 项已筛除)` : `筛选本列`;
+    });
+}
+
+// cscan 表头排序
+document.querySelectorAll('#cscan-table thead th.sortable').forEach(th => {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if (currentCscanSort.col !== col) {
+            currentCscanSort = { col, dir: 'asc' };
+        } else if (currentCscanSort.dir === 'asc') {
+            currentCscanSort.dir = 'desc';
+        } else {
+            currentCscanSort = { col: null, dir: 'none' };
+        }
+        renderCscanRecords();
+    });
+});
+
+// cscan 表头筛选按钮 — 复用 zhongban 现有的 filter-modal
+document.querySelectorAll('.cscan-filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        currentFilterCol = btn.dataset.col;
+        rebuildCscanFilterDistinct();
+        const st = cscanFilterState[currentFilterCol];
+        const body = document.getElementById('filter-modal-body');
+        body.innerHTML = '';
+        document.getElementById('filter-modal-title').textContent = `筛选: ${currentFilterCol} (${st.distinct.length})`;
+        if (st.distinct.length === 0) {
+            body.innerHTML = '<div class="filter-empty">无值</div>';
+        } else {
+            const group = document.createElement('div');
+            group.className = 'filter-group';
+            for (const val of st.distinct) {
+                const checked = !st.excluded.has(val);
+                const lbl = document.createElement('label');
+                lbl.className = 'filter-item';
+                lbl.innerHTML = `<input type="checkbox" data-col="${escapeAttr(currentFilterCol)}" data-val="${escapeAttr(val)}" ${checked ? 'checked' : ''}><span>${escapeHtml(val)}</span>`;
+                group.appendChild(lbl);
+            }
+            body.appendChild(group);
+        }
+        updateFilterSummary();
+        document.getElementById('filter-modal').classList.add('active');
+    });
+});
 
 function openCscanDetail(rec) {
     const modal = document.getElementById('cscan-detail-modal');
     const body = document.getElementById('cscan-detail-body');
+    if (!modal || !body) return;
 
-    // 8 张子图
+    // 8 张子图 (沿用 zhongban 详情弹窗的 .detail-top + .cscan-images-grid 布局)
     const imgBlocks = (['F', 'G']).flatMap(prefix => {
         const order = [
             ['table', '13 列缺陷表格'],
@@ -881,7 +1004,6 @@ function openCscanDetail(rec) {
         return header + cells;
     }).join('');
 
-    // 缺陷表格
     const defects = rec['缺陷表格'] || [];
     const tableRows = defects.length === 0
         ? '<tr><td colspan="13" style="text-align:center;color:#999">无 OCR 数据</td></tr>'
@@ -904,15 +1026,21 @@ function openCscanDetail(rec) {
         `).join('');
 
     body.innerHTML = `
-        <h3 style="margin:0 0 0.5rem 0;color:#2d3748">📡 序号 ${escapeHtml(rec['序号'] || '')} · ${escapeHtml(rec['钢板号'] || '')}</h3>
-        <div style="color:#4a5568;margin-bottom:1rem;font-size:0.9rem">
-            ${escapeHtml(rec['生产厂'] || '')} · ${escapeHtml(rec['钢种'] || '')} · ${escapeHtml(rec['类别'] || '')} · 缺陷: ${escapeHtml(rec['缺陷分析'] || '')}
-            <br>板号=${rec['板号'] ?? '-'} 厚度=${rec['厚度'] ?? '-'}mm 长度=${rec['长度'] ?? '-'}mm 宽度=${rec['宽度'] ?? '-'}mm
+        <div class="detail-top">
+            <div class="detail-fields">
+                <div class="detail-field"><span class="df-label">序号</span><span class="df-value">#${escapeHtml(rec['序号'] || String(rec.row_index))}</span></div>
+                <div class="detail-field"><span class="df-label">钢板号</span><span class="df-value">${escapeHtml(rec['钢板号'] || '-')}</span></div>
+                <div class="detail-field"><span class="df-label">生产厂</span><span class="df-value">${escapeHtml(rec['生产厂'] || '-')}</span></div>
+                <div class="detail-field"><span class="df-label">钢种</span><span class="df-value">${escapeHtml(rec['钢种'] || '-')}</span></div>
+                <div class="detail-field"><span class="df-label">类别</span><span class="df-value">${escapeHtml(rec['类别'] || '-')}</span></div>
+                <div class="detail-field"><span class="df-label">缺陷分析</span><span class="df-value">${escapeHtml(rec['缺陷分析'] || '-')}</span></div>
+                <div class="detail-field"><span class="df-label">板号 (OCR)</span><span class="df-value">${rec['板号'] ?? '-'}</span></div>
+                <div class="detail-field"><span class="df-label">厚度/长度/宽度</span><span class="df-value">${rec['厚度'] ?? '-'} mm / ${rec['长度'] ?? '-'} mm / ${rec['宽度'] ?? '-'} mm</span></div>
+            </div>
+            <button type="button" class="modal-close-in" onclick="closeCscanDetail()">×</button>
         </div>
 
-        <div class="cscan-images-grid">
-            ${imgBlocks}
-        </div>
+        <div class="cscan-images-grid">${imgBlocks}</div>
 
         <h4 style="margin:1rem 0 0.4rem;color:#2d3748">📋 缺陷表格 (${defects.length} 行)</h4>
         <div style="overflow-x:auto">
