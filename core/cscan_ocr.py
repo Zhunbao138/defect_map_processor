@@ -153,23 +153,21 @@ def ocr_defect_table(table_image_path: str | Path) -> list[dict[str, Any]]:
         return []
 
     img = Image.open(table_image_path)
-    # 放大 2x 提升 OCR 准确率
     w, h = img.size
-    if w < 1500:
-        img = img.resize((w * 2, h * 2), Image.LANCZOS)
+    # 放大至 ~3000px 宽, 确保 13 列每列 > 200px
+    scale = max(3, int(3000 / max(w, 1)))
+    img = img.resize((w * scale, h * scale), Image.LANCZOS)
 
-    # 把彩色单元格(红/绿警告色) 转成黑字白底, 提升 OCR 准确率
+    # 彩色表格 → 灰度 → 自适应二值化 (白底黑字)
     try:
-        import numpy as np
+        import cv2, numpy as np
         arr = np.array(img)
-        if arr.ndim == 3 and arr.shape[2] >= 3:
-            # 取 max(R,G,B): 红色文字变深, 背景(白) 仍接近 255
-            gray = arr.max(axis=2)
+        if arr.ndim == 3:
+            gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
         else:
-            gray = arr if arr.ndim == 2 else arr[..., 0]
-        # 二值化: 文字 (暗) -> 黑 (0), 背景 (亮) -> 白 (255)
-        bw = np.where(gray < 160, 0, 255).astype('uint8')
-        # PIL 期望 L 模式 (灰度)
+            gray = np.array(img)
+        # Otsu 自适应阈值: 字暗背景亮 → THRESH_BINARY 保持白底黑字
+        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         from PIL import Image as _PILImage
         img = _PILImage.fromarray(bw, mode='L')
     except Exception:
