@@ -193,7 +193,7 @@ def ocr_defect_table(table_image_path: str | Path) -> list[dict[str, Any]]:
             conf = float(data["conf"][i])
         except (ValueError, TypeError):
             conf = -1
-        if conf < 30:
+        if conf < 15:  # 降低: 红底单元格 conf 可能偏低
             continue
         t = text.replace(",", "").replace("，", "")
         try:

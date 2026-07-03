@@ -527,6 +527,36 @@ def register_routes(app: Flask):
                          mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+    @app.route("/api/cscan_records/<task_id>/<int:row_index>", methods=["PUT"])
+    @auth_required
+    def api_update_cscan_record(task_id: str, row_index: int):
+        """更新 cscan 记录的缺陷表格数据."""
+        data = request.get_json(silent=True) or {}
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+        output_dir = Path(task["output_dir"]) if task else DEFAULT_OUTPUT_DIR / task_id
+        json_path = output_dir / "cscan_records.json"
+        if not json_path.exists():
+            return jsonify({"error": "cscan_records not found"}), 404
+        with open(json_path, "r", encoding="utf-8") as f:
+            all_data = json.load(f)
+        records = all_data.get("records", [])
+        updated = None
+        for r in records:
+            if r.get("row_index") == row_index:
+                for k, v in data.items():
+                    r[k] = v
+                updated = r
+                break
+        if updated is None:
+            return jsonify({"error": f"row_index {row_index} not found"}), 404
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(all_data, f, ensure_ascii=False, indent=2)
+        # 重新生成 xlsx
+        from core.cscan_merger import save_excel
+        save_excel(records, output_dir)
+        return jsonify({"ok": True, "row_index": row_index})
+
     @app.route("/api/records/<task_id>/<int:row_index>", methods=["POST", "PUT"])
     @auth_required
     def api_update_record(task_id: str, row_index: int):
