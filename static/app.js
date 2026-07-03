@@ -576,11 +576,25 @@ function toggleCscanEdit(suffix, rowIdx) {
     const tId = `cscan-tbl-${suffix}-${rowIdx}`;
     const table = document.getElementById(tId);
     if (!table) return;
-    // 每个 td → input
-    const tds = table.querySelectorAll('tbody td');
-    tds.forEach(td => {
+    // 表头加一列"操作"
+    const thead = table.querySelector('thead tr');
+    if (thead && !thead.querySelector('.edit-col-head')) {
+        const th = document.createElement('th'); th.textContent = ''; th.className = 'edit-col-head'; th.style.width = '30px';
+        thead.insertBefore(th, thead.firstChild);
+    }
+    // 每个 tbody tr → 行首加减号按钮 + td → input
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach(tr => {
+        // 如果已有减号列则跳过
+        if (tr.querySelector('td:first-child button')) return;
+        const delTd = document.createElement('td');
+        delTd.innerHTML = `<button onclick="deleteCscanRow(this,'${suffix}',${rowIdx})" title="删除行" style="background:#e53e3e;color:#fff;border:none;border-radius:3px;cursor:pointer;font-weight:bold;padding:2px 6px">−</button>`;
+        tr.insertBefore(delTd, tr.firstChild);
+    });
+    // 每个 td → input (跳过已处理的减号按钮列)
+    table.querySelectorAll('tbody td:not(:first-child)').forEach(td => {
         const val = td.textContent.trim();
-        td.innerHTML = `<div style="display:flex;gap:2px"><input type="text" value="${escapeAttr(val === '-' || val === '无数据' ? '' : val)}" style="width:100%;min-width:55px"><button onclick="deleteCscanRow(this,'${suffix}',${rowIdx})" title="删除行" style="background:#e53e3e;color:#fff;border:none;border-radius:3px;cursor:pointer;padding:0 4px">×</button></div>`;
+        td.innerHTML = `<input type="text" value="${escapeAttr(val === '-' || val === '无数据' ? '' : val)}" style="width:100%;min-width:55px">`;
     });
     // 切换按钮显隐
     document.querySelectorAll(`[id^="cscan-save-"][id$="-${rowIdx}"]`).forEach(b => { if (b.id.includes(suffix)) b.style.display = ''; });
@@ -596,7 +610,11 @@ function addCscanRow(suffix, rowIdx) {
     if (!table) return;
     const cols = ['序号','X起始','X终止','X中点','X长度','Y起始','Y终止','Y中点','Y长度','面积','类型','深度','幅值'];
     const tr = document.createElement('tr');
-    cols.forEach(c => { const td = document.createElement('td'); td.innerHTML = `<div style="display:flex;gap:2px"><input type="text" style="width:100%;min-width:55px"><button onclick="deleteCscanRow(this,'${suffix}',${rowIdx})" title="删除行" style="background:#e53e3e;color:#fff;border:none;border-radius:3px;cursor:pointer;padding:0 4px">×</button></div>`; tr.appendChild(td); });
+    // 行首: 减号删除按钮
+    const delTd = document.createElement('td');
+    delTd.innerHTML = `<button onclick="deleteCscanRow(this,'${suffix}',${rowIdx})" title="删除行" style="background:#e53e3e;color:#fff;border:none;border-radius:3px;cursor:pointer;font-weight:bold;padding:2px 6px">−</button>`;
+    tr.appendChild(delTd);
+    cols.forEach(c => { const td = document.createElement('td'); td.innerHTML = `<input type="text" style="width:100%;min-width:55px">`; tr.appendChild(td); });
     table.querySelector('tbody').appendChild(tr);
 }
 function deleteCscanRow(btn, suffix, rowIdx) {
@@ -610,14 +628,16 @@ function saveCscanEdit(suffix, rowIdx) {
     const cols = ['序号','X起始','X终止','X中点','X长度','Y起始','Y终止','Y中点','Y长度','面积','类型','深度','幅值'];
     const rows = [];
     table.querySelectorAll('tbody tr').forEach(tr => {
-        const inputs = tr.querySelectorAll('td input');
-        if (inputs.length === 0) return;
+        const tds = tr.querySelectorAll('td');
+        // 跳过第一列 (减号按钮)
+        if (tds.length <= 1) return;
         const row = {};
-        inputs.forEach((inp, ci) => {
-            if (ci >= cols.length) return;
+        for (let ci = 1; ci < tds.length && ci - 1 < cols.length; ci++) {
+            const inp = tds[ci].querySelector('input');
+            if (!inp) continue;
             const v = inp.value.trim();
-            if (v) { const n = parseFloat(v); row[cols[ci]] = isNaN(n) ? v : n; }
-        });
+            if (v) { const n = parseFloat(v); row[cols[ci - 1]] = isNaN(n) ? v : n; }
+        }
         if (Object.keys(row).length > 0) rows.push(row);
     });
     fetch(`/api/cscan_records/${currentTaskId}/${rowIdx}`, {
