@@ -247,7 +247,7 @@ class ProcessPipeline:
                     row_images[row].append(img["file_path"])
 
                 all_paths = [p for row in row_order for p in row_images[row]]
-                report("ocr", 0.0, f"开始 OCR 识别 {len(all_paths)} 张图 (每行 _1+_2)...")
+                report("ocr", 0.0, f"开始 {rec_label} 识别 {len(all_paths)} 张图 (每行 _1+_2)...")
                 _ocr_total = len(all_paths)
 
                 def _ocr_progress(done, total):
@@ -255,7 +255,7 @@ class ProcessPipeline:
                     if self.cancel_event is not None and self.cancel_event.is_set():
                         raise InterruptedError("任务被用户取消")
                     report("ocr", done / total if total else 1.0,
-                            f"OCR 识别中 {done}/{total} 张...")
+                            f"{rec_label} 识别中 {done}/{total} 张...")
 
                 if self.config.recognition == "llm":
                     from .llm_ocr import llm_extract_defect_info_batch
@@ -293,9 +293,9 @@ class ProcessPipeline:
                         "raw_text": raws,
                         "warnings": warns,
                     })
-                report("ocr", 1.0, f"OCR 完成, 合并 {len(ocr_results)} 行")
+                report("ocr", 1.0, f"{rec_label} 完成, 合并 {len(ocr_results)} 行")
             else:
-                report("ocr", 1.0, "跳过 OCR 识别")
+                report("ocr", 1.0, f"跳过 {rec_label} 识别")
 
             # ========== 阶段 5: 数据整合 ==========
             report("merge", 0.0, "正在整合数据...")
@@ -484,8 +484,9 @@ class ProcessPipeline:
             total_rows = len(image_map)
             report("extract", 0.7, f"已切图 {total_rows} 行")
 
-            # ========== 阶段 2-3: OCR (缺陷表格 + 板信息) ==========
-            report("ocr", 0.0, "OCR 缺陷表格 + 板信息...")
+            # ========== 阶段 2-3: 识别 (缺陷表格 + 板信息) ==========
+            rec_label_c = "大模型" if self.config.recognition == "llm" else "OCR"
+            report("ocr", 0.0, f"{rec_label_c} 缺陷表格 + 板信息...")
             if self.config.recognition == "llm":
                 from .llm_ocr import llm_ocr_defect_table as ocr_defect_table
                 from .llm_ocr import llm_ocr_board_info as ocr_board_info
