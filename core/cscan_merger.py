@@ -64,14 +64,18 @@ def merge_cscan_records(
         if 序号 is None or 序号 == "":
             continue  # 跳过空行
         # column 2-8: 生产厂/钢板号/钢种/类别/缺陷图谱/缺陷照片/缺陷分析
+        钢板号 = str(ws.cell(row_idx, 3).value or "").strip()
+        钢种 = str(ws.cell(row_idx, 4).value or "").strip()
+        if not 钢板号 and not 钢种:
+            continue  # 钢板号和钢种都空 → 跳过
         record: dict[str, Any] = {
-            "row_index": row_idx + 1,   # 0-based 给 openpyxl 用, 转 1-based 给人看
+            "row_index": row_idx + 1,
             "序号": str(序号),
-            "生产厂": str(ws.cell(row_idx, 2).value or ""),
-            "钢板号": str(ws.cell(row_idx, 3).value or ""),
-            "钢种": str(ws.cell(row_idx, 4).value or ""),
-            "类别": str(ws.cell(row_idx, 5).value or ""),
-            "缺陷分析": str(ws.cell(row_idx, 8).value or ""),
+            "生产厂": str(ws.cell(row_idx, 2).value or "").strip(),
+            "钢板号": 钢板号,
+            "钢种": 钢种,
+            "类别": str(ws.cell(row_idx, 5).value or "").strip(),
+            "缺陷分析": str(ws.cell(row_idx, 8).value or "").strip(),
         }
         # 子图路径
         record.update(image_map.get(row_idx, {}))
