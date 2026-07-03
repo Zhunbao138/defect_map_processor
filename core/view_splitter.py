@@ -234,6 +234,167 @@ def detect_and_crop_ultrasonic_views_legacy(image_path, output_dir=None):
     return result["views"], Path(image_path).parent / f"{Path(image_path).stem}_views"
 
 
+# ============================================================================
+# cscan 模式: 复用矩形检测, 但输出标签改为 table / ascan / cscan
+# ============================================================================
+# cscan 类型 xlsx 里的每张原图内部布局:
+#   ┌──────────────┬─────────┐
+#   │              │         │
+#   │  13列缺陷表格  │  A 扫   │  ← top=table (左上), short=ascan (右上)
+#   │              │         │
+#   ├──────────────┴─────────┤
+#   │         C 扫            │  ← long=cscan (下面)
+#   └────────────────────────┘
+# 复用 detect_and_crop_ultrasonic_views 的算法, 只换标签.
+
+def detect_and_crop_cscan_views(
+    image_path: str | Path,
+    output_dir: str | Path | None = None,
+    draw_annotations: bool = True,
+) -> dict[str, Any]:
+    """检测并截取 cscan 图像中的 3 个区域 (table / ascan / cscan).
+
+    cscan 类型原图布局 (4 个黑色矩形, 按象限分类):
+      ┌─────────────────┬──────────┐
+      │  13列缺陷表格     │  A 扫    │  ← TR = table (小), BR = ascan (右)
+      │  (TR)            │  (BR)    │
+      ├─────────────────┴──────────┤
+      │  C 扫结果图 (BL, 最大)        │  ← BL = cscan
+      │  + 板信息面板 (BL 右下)        │
+      └──────────────────────────────┘
+
+    算法: 找黑色矩形, 按象限分类:
+    - table  = TR 象限 (x > w/2, y < h/3) 面积最大的
+    - cscan  = BL 象限 (x < w/2) 面积最大的
+    - ascan  = BR 象限 (x > w/2, y > h/3) 面积最大的 (即右侧的 A 扫图)
+    """
+    image_path = Path(image_path)
+    if not image_path.exists():
+        raise FileNotFoundError(f"图片不存在: {image_path}")
+
+    img = cv2.imread(str(image_path))
+    if img is None:
+        raise ValueError(f"无法读取图片: {image_path}")
+
+    img_h, img_w = img.shape[:2]
+
+    # ---------- 预处理: cscan 表格有浅色边框, 用 threshold=200 捕获 ----------
+    # (对比 detect_and_crop_ultrasonic_views 的 100: 那个找深色实心区域, 适用于三视图)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    rects = []
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        if w * h < 10000:
+            continue
+        cx, cy = x + w / 2, y + h / 2
+        # 象限: TL/TR/BL/BR (用图像中心和水平中线分)
+        if cx < img_w * 0.5 and cy < img_h * 0.5:
+            quad = "TL"
+        elif cx >= img_w * 0.5 and cy < img_h * 0.5:
+            quad = "TR"
+        elif cx < img_w * 0.5 and cy >= img_h * 0.5:
+            quad = "BL"
+        else:
+            quad = "BR"
+        rects.append({
+            "x": x, "y": y, "w": w, "h": h, "area": w * h, "aspect": w / h,
+            "cx": cx, "cy": cy, "quad": quad,
+        })
+
+    # 按象限分类: 取每个象限里面积最大的矩形
+    by_quad: dict[str, list[dict]] = {"TL": [], "TR": [], "BL": [], "BR": []}
+    for r in rects:
+        by_quad[r["quad"]].append(r)
+
+    # table 在 TL (左上, 浅色边框表格)
+    view_table = max(by_quad["TL"], key=lambda r: r["area"]) if by_quad["TL"] else None
+    # cscan 在 BL (左下, C 扫大图)
+    view_cscan = max(by_quad["BL"], key=lambda r: r["area"]) if by_quad["BL"] else None
+    # ascan 在 TR (右上, A 扫波形)
+    view_ascan = max(by_quad["TR"], key=lambda r: r["area"]) if by_quad["TR"] else None
+    # 板信息 panel: 用固定裁剪, 在右下角 (其实际位置不在 threshold 找到的矩形里)
+    # 经验值: 距右边 0~5%, 距底边 0~25%, 高度 25%
+    # 简化: 整个 image 右下 25%x25% 区域就是 板信息
+    view_board = {
+        "x": int(img_w * 0.78),
+        "y": int(img_h * 0.7),
+        "w": int(img_w * 0.22),
+        "h": int(img_h * 0.3),
+        "area": 0,
+    }
+
+    # ---------- 输出目录 ----------
+    out_dir = (
+        Path(output_dir)
+        if output_dir
+        else image_path.parent / f"{image_path.stem}_views"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # cscan 业务标签
+    views = [
+        (view_table, "table",  "13列缺陷表格 (左上)", (0, 0, 255)),
+        (view_cscan, "cscan",  "C 扫 (左下)",         (0, 200, 0)),
+        (view_ascan, "ascan",  "A 扫 (右上)",         (255, 0, 0)),
+        (view_board, "board",  "板信息 (底部)",       (255, 128, 0)),
+    ]
+
+    saved = {}
+    warnings = []
+
+    for view_dict, en_name, label, color in views:
+        if view_dict is None:
+            warnings.append(f"未检测到 {label}")
+            continue
+        x, y, w, h = (
+            view_dict["x"], view_dict["y"],
+            view_dict["w"], view_dict["h"],
+        )
+        cropped = img[y : y + h, x : x + w]
+        output_path = out_dir / f"{image_path.stem}_{en_name}.png"
+        cv2.imwrite(str(output_path), cropped)
+        saved[en_name] = str(output_path)
+
+    # ---------- 标注图 ----------
+    annotated_path = None
+    if draw_annotations:
+        annotated = img.copy()
+        for view_dict, en_name, label, color in views:
+            if view_dict is None:
+                continue
+            x, y, w, h = (
+                view_dict["x"], view_dict["y"],
+                view_dict["w"], view_dict["h"],
+            )
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), color, 4)
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)
+            cv2.rectangle(
+                annotated,
+                (x, y - label_size[1] - 10),
+                (x + label_size[0] + 10, y),
+                color, -1,
+            )
+            cv2.putText(
+                annotated, label, (x + 5, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2,
+            )
+        annotated_path = out_dir / f"{image_path.stem}_annotated.png"
+        cv2.imwrite(str(annotated_path), annotated)
+
+    return {
+        "image": {"path": str(image_path), "size": (img_w, img_h)},
+        "views": saved,    # {"table": path, "cscan": path, "ascan": path}
+        "annotated": str(annotated_path) if annotated_path else None,
+        "warnings": warnings,
+    }
+
+
 if __name__ == "__main__":
     import sys
 
