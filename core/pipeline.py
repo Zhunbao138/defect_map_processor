@@ -523,7 +523,7 @@ class ProcessPipeline:
             result.elapsed_seconds = time.time() - start_time
             result.stats = {
                 "records_count": len(records),
-                "images_count": total_rows * 8,   # 4 sub-images × F + G = 8 per row
+                "images_count": total_rows * 6,   # 3 sub-images × F + G = 6 per row
             }
             report("complete", 1.0, f"完成 ({result.elapsed_seconds:.1f}s)")
             return result
