@@ -40,15 +40,29 @@
                     </div>
 
                     <div class="options">
-                        <label class="checkbox-label">
+                        <fieldset class="doc-type-fieldset">
+                            <legend>文档类型</legend>
+                            <label class="radio-label">
+                                <input type="radio" name="task_type" value="zhongban" checked>
+                                <span class="doc-type-tag">中板厂</span>
+                                <span class="doc-type-hint">zhongban · 中板厂 6 列基础 + 6 参数 OCR + 三视图</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="task_type" value="cscan">
+                                <span class="doc-type-tag">cscan</span>
+                                <span class="doc-type-hint">中厚板卷厂 13 列缺陷表格 + C/A 扫 + 板信息</span>
+                            </label>
+                        </fieldset>
+
+                        <label class="checkbox-label" id="zhongban-only-1">
                             <input type="checkbox" id="enable-ocr" checked>
                             启用 OCR 识别
                         </label>
-                        <label class="checkbox-label">
+                        <label class="checkbox-label" id="zhongban-only-2">
                             <input type="checkbox" id="enable-split" checked>
                             启用三视图切分
                         </label>
-                        <label class="checkbox-label">
+                        <label class="checkbox-label" id="zhongban-only-3">
                             <input type="checkbox" id="ocr-gpu">
                             OCR GPU 加速
                         </label>

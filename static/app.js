@@ -36,6 +36,16 @@ function updateFileName() {
 }
 
 // ===== 上传表单 =====
+// ===== 文档类型 radio: 切换 body class 以隐藏 zhongban 专用的复选框 =====
+function updateDocTypeUI() {
+    const selected = document.querySelector('input[name="task_type"]:checked')?.value || 'zhongban';
+    document.body.classList.toggle('cscan-mode', selected === 'cscan');
+}
+document.querySelectorAll('input[name="task_type"]').forEach(r => {
+    r.addEventListener('change', updateDocTypeUI);
+});
+updateDocTypeUI();
+
 document.getElementById('upload-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!fileInput.files.length) {
@@ -47,8 +57,12 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
     submitBtn.disabled = true;
     submitBtn.textContent = '上传中...';
 
+    const taskType = document.querySelector('input[name="task_type"]:checked')?.value || 'zhongban';
+
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
+    formData.append('task_type', taskType);
+    // cscan 不需要 enable_ocr/enable_split; 后端会忽略
     formData.append('enable_ocr', document.getElementById('enable-ocr').checked);
     formData.append('enable_split', document.getElementById('enable-split').checked);
     formData.append('ocr_gpu', document.getElementById('ocr-gpu').checked);
