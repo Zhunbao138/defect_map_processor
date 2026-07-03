@@ -1104,10 +1104,24 @@ document.getElementById('cscan-download-json')?.addEventListener('click', () => 
     const payload = { task_id: currentTaskId, count: displayed.length, records: displayed };
     downloadBlob(JSON.stringify(payload, null, 2), 'cscan_records_' + currentTaskId + '.json', 'application/json');
 });
-document.getElementById('cscan-download-excel')?.addEventListener('click', () => {
+document.getElementById('cscan-download-excel')?.addEventListener('click', async () => {
     if (!currentTaskId) return;
-    // xlsx 由后端 openpyxl 按全量生成 (filter/sort 不适用, 全量导出更符合需要)
-    window.location.href = `/api/cscan_records_xlsx/${currentTaskId}`;
+    // 发送当前 filter+sort 的 row_indexes, 后端只导出这些行
+    const displayed = getDisplayedRecords();
+    const indexes = displayed.map(r => r.row_index).filter(Boolean);
+    const resp = await fetch(`/api/cscan_records_xlsx/${currentTaskId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({row_indexes: indexes})
+    });
+    if (!resp.ok) { alert('导出失败'); return; }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'cscan_records_' + currentTaskId + '.xlsx';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 

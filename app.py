@@ -499,30 +499,37 @@ def register_routes(app: Flask):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/cscan_records_xlsx/<task_id>")
+    @app.route("/api/cscan_records_xlsx/<task_id>", methods=["GET", "POST"])
     @auth_required
     def api_cscan_xlsx(task_id: str):
-        """提供 cscan_records.xlsx 下载 (后端 openpyxl 生成)."""
+        """提供 cscan_records.xlsx 下载.
+
+        GET  → 全量 (无 filter)
+        POST → body: {"row_indexes": [8,9,11,...]} 按 filter 导出
+        """
+        import json as _json
+        from core.cscan_merger import save_excel
         with TASK_LOCK:
             task = TASKS.get(task_id)
-        if task:
-            output_dir = Path(task["output_dir"])
-        else:
-            output_dir = DEFAULT_OUTPUT_DIR / task_id
+        output_dir = Path(task["output_dir"]) if task else DEFAULT_OUTPUT_DIR / task_id
+        json_path = output_dir / "cscan_records.json"
+        if not json_path.exists():
+            abort(404)
+        with open(json_path, "r", encoding="utf-8") as f:
+            all_data = _json.load(f)
+        all_records = all_data.get("records", [])
+        if not all_records:
+            abort(404)
+
+        # 如果前端发了 row_indexes (filter+sort 后的行), 只导出这些
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            wanted = set(body.get("row_indexes") or [])
+            if wanted:
+                all_records = [r for r in all_records if r.get("row_index") in wanted]
+
         xlsx_path = output_dir / "cscan_records.xlsx"
-        if not xlsx_path.exists():
-            # 尝试按需生成 (从 JSON 或 DB)
-            from core.cscan_merger import save_excel
-            import json as _json
-            json_path = output_dir / "cscan_records.json"
-            if not json_path.exists():
-                abort(404)
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = _json.load(f)
-            records = data.get("records", [])
-            if not records:
-                abort(404)
-            save_excel(records, output_dir)
+        save_excel(all_records, output_dir)
         return send_file(str(xlsx_path), as_attachment=True,
                          download_name=f"cscan_records_{task_id}.xlsx",
                          mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
