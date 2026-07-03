@@ -1097,13 +1097,16 @@ document.getElementById('download-excel').addEventListener('click', () => {
     window.location.href = `/api/image/${currentTaskId}/defect_records.xlsx`;
 });
 
-// cscan (模板二) download buttons
+// cscan (模板二) download buttons — JSON 按 filter+sort+pagination, Excel 服务端全量
 document.getElementById('cscan-download-json')?.addEventListener('click', () => {
     if (!currentTaskId) return;
-    window.location.href = `/api/cscan_records/${currentTaskId}`;
+    const displayed = getDisplayedRecords();  // filter + sort applied
+    const payload = { task_id: currentTaskId, count: displayed.length, records: displayed };
+    downloadBlob(JSON.stringify(payload, null, 2), 'cscan_records_' + currentTaskId + '.json', 'application/json');
 });
 document.getElementById('cscan-download-excel')?.addEventListener('click', () => {
     if (!currentTaskId) return;
+    // xlsx 由后端 openpyxl 按全量生成 (filter/sort 不适用, 全量导出更符合需要)
     window.location.href = `/api/cscan_records_xlsx/${currentTaskId}`;
 });
 
