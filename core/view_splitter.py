@@ -337,12 +337,11 @@ def detect_and_crop_cscan_views(
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # cscan 业务标签
+    # cscan 业务标签 (3 个区域, 去掉 board)
     views = [
         (view_table, "table",  "13列缺陷表格 (左上)", (0, 0, 255)),
         (view_cscan, "cscan",  "C 扫 (左下)",         (0, 200, 0)),
         (view_ascan, "ascan",  "A 扫 (右上)",         (255, 0, 0)),
-        (view_board, "board",  "板信息 (底部)",       (255, 128, 0)),
     ]
 
     saved = {}
@@ -356,7 +355,13 @@ def detect_and_crop_cscan_views(
             view_dict["x"], view_dict["y"],
             view_dict["w"], view_dict["h"],
         )
-        cropped = img[y : y + h, x : x + w]
+        # 加 15px 外边距, 避免切掉边缘信息; 限制不超出原图
+        MARGIN = 15
+        x0 = max(0, x - MARGIN)
+        y0 = max(0, y - MARGIN)
+        x1 = min(img_w, x + w + MARGIN)
+        y1 = min(img_h, y + h + MARGIN)
+        cropped = img[y0:y1, x0:x1]
         output_path = out_dir / f"{image_path.stem}_{en_name}.png"
         cv2.imwrite(str(output_path), cropped)
         saved[en_name] = str(output_path)

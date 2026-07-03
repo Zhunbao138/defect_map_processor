@@ -439,7 +439,7 @@ class ProcessPipeline:
         """中厚板卷厂 (cscan) 文档的独立处理链.
 
         阶段:
-          1. extract: 从 xlsx 5.1 sheet 提 F/G 列原图, 切出 8 个子图/行 (table/ascan/cscan/board)
+          1. extract: 从 xlsx 5.1 sheet 提 F/G 列原图, 切出 6 个子图/行 (table/ascan/cscan)
           2-3. ocr: 缺陷表格识别 + 板信息识别
           4. merge: bundle 成 cscan_records schema
           5. database: 写 SQLite cscan_records 表 + JSON
@@ -477,22 +477,17 @@ class ProcessPipeline:
             total_rows = len(image_map)
             report("extract", 0.7, f"已切图 {total_rows} 行")
 
-            # ========== 阶段 2-3: OCR (缺陷表格 + 板信息) ==========
-            report("ocr", 0.0, "OCR 缺陷表格 + 板信息...")
-            from .cscan_ocr import ocr_defect_table, ocr_board_info
+            # ========== 阶段 2-3: OCR (缺陷表格) ==========
+            report("ocr", 0.0, "OCR 缺陷表格...")
+            from .cscan_ocr import ocr_defect_table
             ocr_table_map: dict[int, list[dict]] = {}
-            ocr_board_map: dict[int, dict] = {}
             total = max(total_rows, 1)
             for idx, (row_idx, paths) in enumerate(sorted(image_map.items())):
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     raise InterruptedError("任务被用户取消")
-                # F 和 G 取一个就够 (内容相同)
                 ft = paths.get("F_table") or paths.get("G_table")
-                fb = paths.get("F_board") or paths.get("G_board")
                 if ft and os.path.exists(ft):
                     ocr_table_map[row_idx] = ocr_defect_table(ft)
-                if fb and os.path.exists(fb):
-                    ocr_board_map[row_idx] = ocr_board_info(fb)
                 report("ocr", 0.1 + 0.7 * (idx + 1) / total, f"OCR {idx + 1}/{total}")
 
             # ========== 阶段 4: merge ==========
@@ -500,7 +495,6 @@ class ProcessPipeline:
             records = merge_cscan_records(
                 file_path, image_map,
                 ocr_table_map=ocr_table_map,
-                ocr_board_map=ocr_board_map,
             )
             # 补 row_index 给 result
             for r in records:

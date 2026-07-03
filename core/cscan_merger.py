@@ -19,8 +19,8 @@ from openpyxl import load_workbook
 CSCAN_RECORD_FIELDS = (
     "序号", "生产厂", "钢板号", "钢种", "类别", "缺陷分析",
     # 子图路径 (8 张)
-    "F_table", "F_ascan", "F_cscan", "F_board",
-    "G_table", "G_ascan", "G_cscan", "G_board",
+    "F_table", "F_ascan", "F_cscan",
+    "G_table", "G_ascan", "G_cscan",
     # OCR 字段
     "缺陷表格",       # list[dict], 13 列每行
     "板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
@@ -32,7 +32,6 @@ def merge_cscan_records(
     xlsx_path: str | Path,
     image_map: dict[int, dict[str, str]],
     ocr_table_map: dict[int, list[dict[str, Any]]] | None = None,
-    ocr_board_map: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """从 xlsx 的 5.1 sheet 提取基础字段, 与 image_map/OCR 结果合并.
 
@@ -40,14 +39,13 @@ def merge_cscan_records(
         xlsx_path: cscan xlsx 路径 (用 5.1 sheet, 索引 1)
         image_map: {row_idx: {"F_table": path, ...}} — cscan_ocr.extract_cscan_from_xlsx 的输出
         ocr_table_map: {row_idx: list[dict]} — 缺陷表格 OCR 结果 (可选)
-        ocr_board_map: {row_idx: dict} — 板信息 OCR 结果 (可选)
+        image_map: {row_idx: {F_table: path, ...}}
 
     Returns:
         list of cscan record dicts
     """
     xlsx_path = Path(xlsx_path)
     ocr_table_map = ocr_table_map or {}
-    ocr_board_map = ocr_board_map or {}
 
     wb = load_workbook(str(xlsx_path), data_only=True)
     if len(wb.sheetnames) < 2:
@@ -83,14 +81,10 @@ def merge_cscan_records(
                 record[k] = None
         # OCR 字段
         record["缺陷表格"] = ocr_table_map.get(row_idx, [])
-        board = ocr_board_map.get(row_idx, {})
-        for en, cn in [
-            ("plate_no", "板号"), ("test_code", "探伤代号"),
-            ("grade", "钢种OCR"), ("prod_date", "生产日期"),
-            ("test_date", "检测日期"), ("standard", "标准号"),
-            ("thickness", "厚度"), ("length", "长度"), ("width", "宽度"),
-        ]:
-            record[cn] = board.get(en)
+        # 板信息字段暂留 None (OCR 还没做, 下步补)
+        for cn in ("板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
+                    "标准号", "厚度", "长度", "宽度"):
+            record.setdefault(cn, None)
         record["warnings"] = []
         records.append(record)
 
@@ -119,8 +113,8 @@ def ensure_cscan_table(conn: sqlite3.Connection) -> None:
             row_index INTEGER NOT NULL,
             "序号" TEXT, "生产厂" TEXT, "钢板号" TEXT, "钢种" TEXT,
             "类别" TEXT, "缺陷分析" TEXT,
-            F_table TEXT, F_ascan TEXT, F_cscan TEXT, F_board TEXT,
-            G_table TEXT, G_ascan TEXT, G_cscan TEXT, G_board TEXT,
+            F_table TEXT, F_ascan TEXT, F_cscan TEXT,
+            G_table TEXT, G_ascan TEXT, G_cscan TEXT,
             缺陷表格 TEXT,
             "板号" TEXT, "探伤代号" TEXT, "钢种OCR" TEXT, "生产日期" TEXT,
             "检测日期" TEXT, "标准号" TEXT, "厚度" REAL, "长度" REAL, "宽度" REAL,
@@ -147,17 +141,17 @@ def save_to_db(conn: sqlite3.Connection, task_id: str, records: list[dict[str, A
         conn.execute("""
             INSERT OR REPLACE INTO cscan_records
             (task_id, row_index, "序号", "生产厂", "钢板号", "钢种", "类别", "缺陷分析",
-             F_table, F_ascan, F_cscan, F_board,
-             G_table, G_ascan, G_cscan, G_board,
+             F_table, F_ascan, F_cscan,
+             G_table, G_ascan, G_cscan,
              缺陷表格, "板号", "探伤代号", "钢种OCR", "生产日期", "检测日期",
              "标准号", "厚度", "长度", "宽度", warnings, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             task_id, row_1based,
             r.get("序号"), r.get("生产厂"), r.get("钢板号"), r.get("钢种"),
             r.get("类别"), r.get("缺陷分析"),
-            r.get("F_table"), r.get("F_ascan"), r.get("F_cscan"), r.get("F_board"),
-            r.get("G_table"), r.get("G_ascan"), r.get("G_cscan"), r.get("G_board"),
+            r.get("F_table"), r.get("F_ascan"), r.get("F_cscan"),
+            r.get("G_table"), r.get("G_ascan"), r.get("G_cscan"),
             defect_table_json,
             r.get("板号"), r.get("探伤代号"), r.get("钢种OCR"), r.get("生产日期"),
             r.get("检测日期"), r.get("标准号"),

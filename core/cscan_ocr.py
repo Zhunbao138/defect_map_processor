@@ -1,6 +1,6 @@
 """cscan 文档处理模块 (中厚板卷厂).
 
-- 提取 F/G 列原图 → 切出 4 个子图 (table / ascan / cscan / board) → 保存
+- 提取 F/G 列原图 → 切出 3 个子图 (table / ascan / cscan) → 保存
 - OCR 13 列缺陷表格 → 13 个字段每行
 - OCR 板信息 panel → 板号/钢种/厚度/长度/宽度 等字段
 
@@ -40,7 +40,7 @@ def split_cscan_views(
         prefix: 文件名前缀 (如 "F" / "G", 留空则不加)
 
     Returns:
-        {"table": Path, "ascan": Path, "cscan": Path, "board": Path, "warnings": [...]}
+        {"table": Path, "ascan": Path, "cscan": Path, "warnings": [...]}
     """
     from .view_splitter import detect_and_crop_cscan_views
 
@@ -67,8 +67,8 @@ def extract_cscan_from_xlsx(
     Returns:
         {
             row_idx: {
-                "F_table": "path", "F_ascan": "path", "F_cscan": "path", "F_board": "path",
-                "G_table": "path", "G_ascan": "path", "G_cscan": "path", "G_board": "path",
+                "F_table": "path", "F_ascan": "path", "F_cscan": "path",
+                "G_table": "path", "G_ascan": "path", "G_cscan": "path",
             },
             ...
         }
