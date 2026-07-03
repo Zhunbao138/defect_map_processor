@@ -504,7 +504,13 @@ class ProcessPipeline:
             # ========== 阶段 5: 保存 JSON + DB ==========
             json_path = save_json(records, output_dir)
             result.json_path = str(json_path)
-            report("database", 0.5, f"已存 JSON: {json_path.name}")
+            report("database", 0.3, f"已存 JSON: {json_path.name}")
+
+            # 生成 xlsx
+            from .cscan_merger import save_excel as cscan_save_excel
+            excel_path = cscan_save_excel(records, output_dir)
+            result.excel_path = str(excel_path)
+            report("database", 0.5, f"已存 XLSX: {excel_path.name}")
 
             db_count = 0
             if self.config.save_to_db:

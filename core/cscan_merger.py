@@ -95,6 +95,95 @@ def merge_cscan_records(
     return records
 
 
+# ============================================================
+# xlsx 导出 (openpyxl, 参考 data_merger.save_excel)
+# ============================================================
+_CSCAN_IMAGE_COLUMNS = {
+    "F_table", "F_ascan", "F_cscan",
+    "G_table", "G_ascan", "G_cscan",
+}
+_DISPLAY_SCALE = 0.25   # 图片在 xlsx 中显示缩放 (与 data_merger 一致)
+
+
+def save_excel(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
+    """生成 cscan_records.xlsx, 嵌入 6 张子图 (原图字节不变, 显示缩放)."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.utils import get_column_letter
+        from openpyxl.utils.units import pixels_to_EMU
+    except ImportError:
+        raise ImportError("需要 openpyxl")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "缺陷记录"
+
+    # 表头
+    headers = [
+        "序号", "生产厂", "钢板号", "钢种", "类别", "缺陷分析",
+        "F_table", "F_ascan", "F_cscan",
+        "G_table", "G_ascan", "G_cscan",
+    ]
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+
+    for row_idx, rec in enumerate(records, 2):
+        row_data = [
+            rec.get("序号", ""), rec.get("生产厂", ""), rec.get("钢板号", ""),
+            rec.get("钢种", ""), rec.get("类别", ""), rec.get("缺陷分析", ""),
+        ]
+        for h in headers[6:]:  # 6 个子图路径
+            row_data.append(rec.get(h, ""))
+        for col_idx, val in enumerate(row_data, 1):
+            header = headers[col_idx - 1]
+            cell = ws.cell(row=row_idx, column=col_idx, value="")
+            if header in _CSCAN_IMAGE_COLUMNS and val and isinstance(val, str):
+                path = Path(val)
+                if path.is_file():
+                    try:
+                        img = XLImage(str(path))
+                        raw_w, raw_h = img.width or 0, img.height or 0
+                        disp_w, disp_h = int(raw_w * _DISPLAY_SCALE), int(raw_h * _DISPLAY_SCALE)
+                        img.width, img.height = disp_w, disp_h
+                        img.anchor = cell.coordinate
+                        ws.add_image(img)
+                        if hasattr(img.anchor, 'ext') and img.anchor.ext is not None and disp_w and disp_h:
+                            img.anchor.ext.cx = pixels_to_EMU(disp_w)
+                            img.anchor.ext.cy = pixels_to_EMU(disp_h)
+                        col_letter = get_column_letter(cell.column)
+                        target_w = int(disp_w * 0.14) + 2 if disp_w else 15
+                        ws.column_dimensions[col_letter].width = max(
+                            ws.column_dimensions[col_letter].width or 0, target_w
+                        )
+                        target_h = int(disp_h * 0.75) + 4 if disp_h else 15
+                        ws.row_dimensions[cell.row].height = max(
+                            ws.row_dimensions[cell.row].height or 0, target_h
+                        )
+                        continue
+                    except Exception:
+                        pass
+                cell.value = val if val else ""
+            else:
+                cell.value = val
+
+    # 非图片列宽自适应
+    for col_idx in range(1, 7):
+        col_letter = get_column_letter(col_idx)
+        ws.column_dimensions[col_letter].width = max(12, min(40, len(headers[col_idx - 1]) * 2 + 5))
+
+    excel_path = output_dir / "cscan_records.xlsx"
+    wb.save(str(excel_path))
+    return excel_path
+
+
 def save_json(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
     """写到 output_dir/cscan_records.json."""
     output_dir = Path(output_dir)

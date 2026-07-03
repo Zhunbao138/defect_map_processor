@@ -498,6 +498,35 @@ def register_routes(app: Flask):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    @app.route("/api/cscan_records_xlsx/<task_id>")
+    @auth_required
+    def api_cscan_xlsx(task_id: str):
+        """提供 cscan_records.xlsx 下载 (后端 openpyxl 生成)."""
+        with TASK_LOCK:
+            task = TASKS.get(task_id)
+        if task:
+            output_dir = Path(task["output_dir"])
+        else:
+            output_dir = DEFAULT_OUTPUT_DIR / task_id
+        xlsx_path = output_dir / "cscan_records.xlsx"
+        if not xlsx_path.exists():
+            # 尝试按需生成 (从 JSON 或 DB)
+            from core.cscan_merger import save_excel
+            import json as _json
+            json_path = output_dir / "cscan_records.json"
+            if not json_path.exists():
+                abort(404)
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            records = data.get("records", [])
+            if not records:
+                abort(404)
+            save_excel(records, output_dir)
+        return send_file(str(xlsx_path), as_attachment=True,
+                         download_name=f"cscan_records_{task_id}.xlsx",
+                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
     @app.route("/api/records/<task_id>/<int:row_index>", methods=["POST", "PUT"])
     @auth_required
     def api_update_record(task_id: str, row_index: int):

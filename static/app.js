@@ -1004,8 +1004,17 @@ document.getElementById('download-json').addEventListener('click', () => {
 
 document.getElementById('download-excel').addEventListener('click', () => {
     if (!currentTaskId) return;
-    // 后端 openpyxl 生成的 xlsx, 通过 /api/image/<task>/defect_records.xlsx 提供下载
     window.location.href = `/api/image/${currentTaskId}/defect_records.xlsx`;
+});
+
+// cscan (模板二) download buttons
+document.getElementById('cscan-download-json')?.addEventListener('click', () => {
+    if (!currentTaskId) return;
+    window.location.href = `/api/cscan_records/${currentTaskId}`;
+});
+document.getElementById('cscan-download-excel')?.addEventListener('click', () => {
+    if (!currentTaskId) return;
+    window.location.href = `/api/cscan_records_xlsx/${currentTaskId}`;
 });
 
 
