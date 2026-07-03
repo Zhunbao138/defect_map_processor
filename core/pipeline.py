@@ -227,7 +227,8 @@ class ProcessPipeline:
             else:
                 report("split", 1.0, "跳过视图切分")
 
-            # ========== 阶段 4: OCR 识别 ==========
+            # ========== 阶段 4: 识别 ==========
+            rec_label = "大模型" if self.config.recognition == "llm" else "OCR"
             # 跑两次: 1) 1_top 切图拿缺陷数据 2) 原图顶部标题栏拿钢板号/尺寸
             # 合并两个结果
             ocr_results = []
