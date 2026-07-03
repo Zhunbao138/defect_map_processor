@@ -529,18 +529,21 @@ function buildCscanDetailHTML(rec) {
         {key:'G_table', label:'G表格'}, {key:'G_ascan', label:'G-A扫'}, {key:'G_cscan', label:'G-C扫'}
     ].map(k => cellImg(ci(k.key), k.label)).join('');
 
-    // 13 列缺陷表格
-    const defectTable = rec['缺陷表格'] || [];
-    let tableHTML = '';
-    if (defectTable.length > 0) {
-        const cols = ['序号','X起始','X终止','X中点','X长度','Y起始','Y终止','Y中点','Y长度','面积','类型','深度','幅值'];
-        tableHTML = `<h4>📊 缺陷表格 (${defectTable.length} 行)</h4>
-        <div style="overflow-x:auto"><table class="cscan-defect-table"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>
-        ${defectTable.map(row => '<tr>' + cols.map(c => `<td>${row[c] ?? '-'}</td>`).join('') + '</tr>').join('')}
+    // F/G 缺陷表格分别显示
+    const cols = ['序号','X起始','X终止','X中点','X长度','Y起始','Y终止','Y中点','Y长度','面积','类型','深度','幅值'];
+    function renderTable(label, data, suffix) {
+        if (!data || data.length === 0) return `<h4>📊 ${label} (0 行)</h4><p class="empty-params">无数据</p>`;
+        const rowIdx = rec.row_index;
+        const tId = `cscan-edit-${suffix}-${rowIdx}`;
+        return `<h4>📊 ${label} (${data.length} 行)
+            <button class="btn-edit-params" onclick="toggleCscanEdit(this, '${suffix}', ${rowIdx})">✏️ 编辑</button>
+            <button class="btn-edit-params" onclick="saveCscanEdit('${suffix}', ${rowIdx})" style="display:none" id="cscan-save-${suffix}-${rowIdx}">💾 保存</button></h4>
+        <div style="overflow-x:auto"><table class="cscan-defect-table" id="${tId}"><thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>
+        ${data.map((row, ri) => '<tr>' + cols.map(c => `<td data-col="${c}" data-ri="${ri}">${row[c] ?? '-'}</td>`).join('') + '</tr>').join('')}
         </tbody></table></div>`;
-    } else {
-        tableHTML = `<p class="empty-params">无缺陷表格数据</p>`;
     }
+    const tableHTML = renderTable('缺陷表格-F', rec['缺陷表格_F'], 'F')
+                    + renderTable('缺陷表格-G', rec['缺陷表格_G'], 'G');
 
     return `
         <div class="record-body">
@@ -558,6 +561,45 @@ function buildCscanDetailHTML(rec) {
             </div>
             ${tableHTML}
         </div>`;
+}
+
+// cscan 缺陷表格编辑
+function toggleCscanEdit(btn, suffix, rowIdx) {
+    const tId = `cscan-edit-${suffix}-${rowIdx}`;
+    const table = document.getElementById(tId);
+    if (!table) return;
+    const tds = table.querySelectorAll('tbody td');
+    const saveBtn = document.getElementById(`cscan-save-${suffix}-${rowIdx}`);
+    tds.forEach(td => {
+        const val = td.textContent.trim();
+        td.innerHTML = `<input type="text" value="${escapeAttr(val === '-' ? '' : val)}" style="width:100%;min-width:60px">`;
+    });
+    btn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = '';
+}
+function saveCscanEdit(suffix, rowIdx) {
+    const tId = `cscan-edit-${suffix}-${rowIdx}`;
+    const table = document.getElementById(tId);
+    if (!table) return;
+    const cols = ['序号','X起始','X终止','X中点','X长度','Y起始','Y终止','Y中点','Y长度','面积','类型','深度','幅值'];
+    const rows = [];
+    table.querySelectorAll('tbody tr').forEach(tr => {
+        const row = {};
+        tr.querySelectorAll('td input').forEach((inp, ci) => {
+            const v = inp.value.trim();
+            if (v) { const n = parseFloat(v); row[cols[ci]] = isNaN(n) ? v : n; }
+        });
+        if (Object.keys(row).length > 0) rows.push(row);
+    });
+    const key = `缺陷表格_${suffix}`;
+    fetch(`/api/cscan_records/${currentTaskId}/${rowIdx}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({[key]: rows})
+    }).then(r => r.json()).then(d => {
+        if (d.error) alert('保存失败: ' + d.error);
+        else { alert('已保存'); closeRecordDetail(); }
+    }).catch(e => alert('保存失败: ' + e.message));
 }
 
 function closeRecordDetail() {
