@@ -122,6 +122,29 @@ def auth_required(f):
 # ============= /HTTP Basic Auth =============
 
 
+def _load_cscan_from_db(conn, task_id: str) -> list[dict]:
+    """从 SQLite cscan_records 读 records, 反序列化 缺陷表格 JSON."""
+    import json as _json
+    rows = conn.execute(
+        "SELECT * FROM cscan_records WHERE task_id = ? ORDER BY row_index",
+        (task_id,),
+    ).fetchall()
+    cols = [d[0] for d in conn.execute("PRAGMA table_info(cscan_records)").fetchall()]
+    results = []
+    for row in rows:
+        d = dict(zip(cols, row))
+        try:
+            d["缺陷表格"] = _json.loads(d.get("缺陷表格") or "[]")
+        except Exception:
+            d["缺陷表格"] = []
+        try:
+            d["warnings"] = _json.loads(d.get("warnings") or "[]")
+        except Exception:
+            d["warnings"] = []
+        results.append(d)
+    return results
+
+
 def create_app() -> Flask:
     """创建 Flask 应用。"""
     app = Flask(
@@ -190,10 +213,21 @@ def register_routes(app: Flask):
         enable_ocr = request.form.get("enable_ocr", "true").lower() == "true"
         enable_split = request.form.get("enable_split", "true").lower() == "true"
         use_gpu = request.form.get("ocr_gpu", "false").lower() == "true"
+        task_type = request.form.get("task_type", "zhongban").lower()
+        if task_type not in ("zhongban", "cscan"):
+            task_type = "zhongban"
+
+        # cscan 流程不需要 6 列 OCR/切图
+        if task_type == "cscan":
+            enable_ocr = False
+            enable_split = False
+
+        with TASK_LOCK:
+            TASKS[task_id]["task_type"] = task_type
 
         thread = threading.Thread(
             target=run_task,
-            args=(task_id, str(saved_path), str(output_dir), enable_ocr, enable_split, use_gpu),
+            args=(task_id, str(saved_path), str(output_dir), enable_ocr, enable_split, use_gpu, task_type),
             daemon=True,
         )
         thread.start()
@@ -339,6 +373,7 @@ def register_routes(app: Flask):
                         "progress": t.get("progress", 0),
                         "file": Path(t["file"]).name if t.get("file") else "",
                         "created_at": t.get("created_at", 0),
+                        "task_type": t.get("task_type", "zhongban"),
                         "source": "memory",
                     }
                 )
@@ -352,13 +387,20 @@ def register_routes(app: Flask):
             if tid in seen:
                 continue
             json_path = task_dir / "defect_records.json"
-            if not json_path.exists():
+            # cscan 任务用 cscan_records.json, 兼容两种
+            cscan_path = task_dir / "cscan_records.json"
+            json_path_eff = cscan_path if cscan_path.exists() else json_path
+            if not json_path_eff.exists():
                 continue
+            detected_type = "cscan" if cscan_path.exists() else "zhongban"
+            # 读取元数据
             # 读取元数据
             try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    records = json.load(f)
-                count = len(records)
+                with open(json_path_eff, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # 文件可能是 list 也可能是 dict (带 count/records 字段)
+                records = data.get("records", data) if isinstance(data, dict) else data
+                count = len(records) if isinstance(records, list) else 0
             except Exception:
                 count = 0
             # 从数据库查文件名 (按 output_dir 匹配 tasks 表)
@@ -393,6 +435,7 @@ def register_routes(app: Flask):
                     "file": file_name,
                     "created_at": created_at,
                     "count": count,
+                    "task_type": detected_type,
                     "source": "disk",
                 }
             )
@@ -414,6 +457,45 @@ def register_routes(app: Flask):
                 return jsonify({"ok": False, "error": f"任务 {task_id} 不在跑"}), 404
             event.set()
         return jsonify({"ok": True, "message": f"已请求取消 {task_id}, 将在下次 progress 回调中停止"}), 200
+
+    @app.route("/api/cscan_records/<task_id>")
+    @auth_required
+    def api_cscan_records(task_id: str):
+        """读 cscan_records (中厚板卷厂 schema). 从 SQLite 优先, fallback JSON."""
+        try:
+            # 优先从内存里的 TASKS (实时) 拿 output_dir
+            output_dir = None
+            with TASK_LOCK:
+                t = TASKS.get(task_id)
+                if t:
+                    output_dir = Path(t.get("output_dir", ""))
+            # 兜底: 磁盘路径
+            if not output_dir or not output_dir.exists():
+                output_dir = DEFAULT_OUTPUT_DIR / task_id
+            if not output_dir.exists():
+                return jsonify({"error": f"任务 {task_id} 不存在"}), 404
+
+            # 优先从 SQLite 读
+            import sqlite3
+            db_path = PROJECT_ROOT / "data" / "defect_map.db"
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                try:
+                    records = _load_cscan_from_db(conn, task_id)
+                    if records:
+                        return jsonify({"task_id": task_id, "count": len(records), "records": records})
+                finally:
+                    conn.close()
+
+            # Fallback 从 JSON 读
+            json_path = output_dir / "cscan_records.json"
+            if not json_path.exists():
+                return jsonify({"error": f"任务 {task_id} 没有 cscan_records"}), 404
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return jsonify({"task_id": task_id, **data})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     @app.route("/api/records/<task_id>/<int:row_index>", methods=["POST", "PUT"])
     @auth_required
@@ -488,6 +570,7 @@ def run_task(
     enable_ocr: bool,
     enable_split: bool,
     use_gpu: bool,
+    task_type: str = "zhongban",
 ):
     """后台执行处理任务。"""
 
@@ -518,6 +601,7 @@ def run_task(
             enable_ocr=enable_ocr,
             enable_split=enable_split,
             ocr_gpu=use_gpu,
+            task_type=task_type,
         )
         pipeline = ProcessPipeline(config)
         pipeline.cancel_event = cancel_event

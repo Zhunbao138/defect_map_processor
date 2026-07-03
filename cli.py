@@ -46,6 +46,7 @@ def cmd_process(args):
         enable_split=not args.no_split,
         ocr_gpu=args.gpu,
         ocr_languages=tuple(args.lang.split(",")) if args.lang else ("en", "ch_sim"),
+        task_type=args.type,
     )
 
     pipeline = ProcessPipeline(config)
@@ -55,13 +56,17 @@ def cmd_process(args):
     if result.success:
         print(f"✓ 处理成功! 耗时 {result.elapsed_seconds:.1f} 秒")
         print(f"\n统计信息:")
-        print(f"  - 缺陷记录:  {result.stats['records_count']:>4d}")
-        print(f"  - 提取图片:  {result.stats['images_count']:>4d}")
-        print(f"  - 切分视图:  {result.stats['views_count']:>4d}")
-        print(f"  - OCR 成功:  {result.stats['ocr_count']:>4d}")
+        print(f"  - 缺陷记录:  {result.stats.get('records_count', 0):>4d}")
+        print(f"  - 提取图片:  {result.stats.get('images_count', 0):>4d}")
+        if 'views_count' in result.stats:
+            print(f"  - 切分视图:  {result.stats['views_count']:>4d}")
+            print(f"  - OCR 成功:  {result.stats['ocr_count']:>4d}")
+        else:
+            print(f"  - 类型:      cscan")
         print(f"\n输出文件:")
         print(f"  - JSON:  {result.json_path}")
-        print(f"  - Excel: {result.excel_path}")
+        if result.excel_path:
+            print(f"  - Excel: {result.excel_path}")
         return 0
     else:
         print(f"✗ 处理失败")
@@ -104,6 +109,11 @@ def main():
         "-s", "--sheet", default="Sheet2", help="Sheet 名称 (默认: Sheet2)"
     )
     p_process.add_argument("--no-ocr", action="store_true", help="跳过 OCR 识别")
+    p_process.add_argument(
+        "-t", "--type", default="zhongban",
+        choices=["zhongban", "cscan"],
+        help="文档类型: zhongban (中板厂, 默认) / cscan (中厚板卷厂)",
+    )
     p_process.add_argument(
         "--no-split", action="store_true", help="跳过三视图切分"
     )
