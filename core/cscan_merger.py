@@ -221,7 +221,10 @@ def save_excel(records: list[dict[str, Any]], output_dir: str | Path) -> Path:
             plate = rec.get("钢板号", "")
             dt = rec.get(f"缺陷表格_{suffix}") or []
             for drow in dt:
-                vals = [plate] + [drow.get(c, "") for c in defect_cols[1:]]
+                if isinstance(drow, list):
+                    vals = [plate] + drow
+                else:
+                    vals = [plate] + [drow.get(c, "") for c in defect_cols[1:]]
                 for ci, val in enumerate(vals, 1):
                     ws2.cell(row=sheet_row, column=ci, value=val if val is not None else "")
                 sheet_row += 1
