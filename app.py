@@ -414,11 +414,15 @@ def register_routes(app: Flask):
             except Exception:
                 pass
             if not file_name:
-                # 从 JSON 读 source_file
+                # 从 task_info.json 读文件名
                 try:
-                    file_name = data.get("source_file", "") if isinstance(data, dict) else ""
+                    ti_path = task_dir / "task_info.json"
+                    if ti_path.exists():
+                        with open(ti_path) as tf:
+                            ti = json.load(tf)
+                        file_name = ti.get("source_file", "")
                 except Exception:
-                    file_name = ""
+                    pass
             if not file_name:
                 file_name = f"任务 {tid} ({count} 条)"
 
