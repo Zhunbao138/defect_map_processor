@@ -471,14 +471,18 @@ def register_routes(app: Flask):
             # 优先从 SQLite 读
             import sqlite3
             db_path = PROJECT_ROOT / "data" / "defect_map.db"
+            db_records = None
             if db_path.exists():
-                conn = sqlite3.connect(str(db_path))
                 try:
-                    records = _load_cscan_from_db(conn, task_id)
-                    if records:
-                        return jsonify({"task_id": task_id, "count": len(records), "records": records})
-                finally:
-                    conn.close()
+                    conn = sqlite3.connect(str(db_path))
+                    try:
+                        db_records = _load_cscan_from_db(conn, task_id)
+                    finally:
+                        conn.close()
+                except Exception:
+                    pass  # DB 表不存在/损坏 → 回退到 JSON
+            if db_records:
+                return jsonify({"task_id": task_id, "count": len(db_records), "records": db_records})
 
             # Fallback 从 JSON 读
             json_path = output_dir / "cscan_records.json"
