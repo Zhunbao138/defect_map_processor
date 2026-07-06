@@ -19,9 +19,10 @@ def _image_to_base64(image_path: str | Path) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def _call_llm(prompt: str, image_path: str | Path) -> str:
-    """调用本地大模型, 传入图片 + 提示词, 返回原始文本响应."""
+def _call_llm(prompt: str, image_path: str | Path, retries: int = 3) -> str:
+    """调用本地大模型, 返回空时自动重试."""
     import urllib.request
+    import time
 
     b64 = _image_to_base64(image_path)
     body = json.dumps({
@@ -38,17 +39,26 @@ def _call_llm(prompt: str, image_path: str | Path) -> str:
         "max_tokens": 10000,
     }).encode("utf-8")
 
-    req = urllib.request.Request(
-        f"{LLM_URL}/v1/chat/completions",
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
-    except Exception as e:
-        return f"LLM_ERROR: {e}"
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                f"{LLM_URL}/v1/chat/completions",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if raw and raw.strip():
+                return raw
+            if attempt < retries - 1:
+                time.sleep(2)  # 等 2 秒再试
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(2)
+            else:
+                return f"LLM_ERROR: {e}"
+    return ""
 
 
 def llm_ocr_defect_table(image_path: str | Path) -> list[dict[str, Any]]:
