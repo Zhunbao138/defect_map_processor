@@ -15,8 +15,18 @@ LLM_URL = "http://127.0.0.1:8080"  # 可改
 
 
 def _image_to_base64(image_path: str | Path) -> str:
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+    """读图片, 压缩到 1024px 宽 JPEG, 返回 base64. 原图太大 LLM 会拒绝."""
+    from PIL import Image
+    import io
+    im = Image.open(image_path)
+    w, h = im.size
+    if w > 1024:
+        scale = 1024 / w
+        im = im.resize((1024, int(h * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    fmt = "JPEG" if im.mode == "RGB" else "PNG"
+    im.save(buf, format=fmt, quality=85)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 def _call_llm(prompt: str, image_path: str | Path) -> str:
