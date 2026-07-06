@@ -704,6 +704,14 @@ def run_task(
                         "excel_path": result.excel_path,
                     }
                 )
+            # 保存文件名到 task_info.json (重启后能恢复)
+            try:
+                import json as _json
+                ti = {"source_file": Path(file_path).name}
+                with open(Path(output_dir) / "task_info.json", "w", encoding="utf-8") as tf:
+                    _json.dump(ti, tf, ensure_ascii=False)
+            except Exception:
+                pass
     finally:
         # 清理
         with TASK_LOCK:
