@@ -414,7 +414,12 @@ def register_routes(app: Flask):
             except Exception:
                 pass
             if not file_name:
-                # 回退: 用 task_dir 名 + 记录数
+                # 从 JSON 读 source_file
+                try:
+                    file_name = data.get("source_file", "") if isinstance(data, dict) else ""
+                except Exception:
+                    file_name = ""
+            if not file_name:
                 file_name = f"任务 {tid} ({count} 条)"
 
             # 创建时间 = 目录 mtime
