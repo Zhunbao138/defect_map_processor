@@ -66,6 +66,8 @@ def llm_ocr_defect_table(image_path: str | Path) -> list[dict[str, Any]]:
     prompt = "提取表格每行: 序号,X起始,X终止,X中点,X长度,Y起始,Y终止,Y中点,Y长度,面积,类型,深度,幅值。只返回JSON数组。"
     try:
         raw = _call_llm(prompt, image_path)
+        # LLM 有时返回 "100." 这样的非法 JSON, 补 0
+        raw = re.sub(r'(?<!\d)(\d+)\.(?!\d)', r'\1.0', raw)
         m = re.search(r"\[.*\]", raw, re.DOTALL)
         if not m:
             last_complete = re.search(r"(\[.*\})", raw, re.DOTALL)
