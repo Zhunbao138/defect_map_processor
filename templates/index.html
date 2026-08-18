@@ -1,0 +1,243 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>钢材缺陷图像知识库</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>🔬 钢材缺陷图像知识库</h1>
+        <p class="subtitle">导入 → 提取 → 切分 → OCR → 整合 → 展示</p>
+
+        <!-- 顶栏: 上传按钮 + 任务下拉 -->
+        <div class="app-bar">
+            <button type="button" class="app-bar-btn" id="open-upload-btn">
+                📁 上传 Excel 文件
+            </button>
+            <select id="task-list" class="task-list-inline">
+                <option value="">暂无任务</option>
+            </select>
+        </div>
+    </header>
+
+    <main>
+<!-- ========== 上传弹窗 ========== -->
+        <div class="modal upload-modal" id="upload-modal">
+            <div class="modal-content">
+                <h3>📁 上传 Excel 文件</h3>
+                <p class="hint">支持 <strong>.xls / .xlsx</strong> 格式，DISPIMG 图片自动转换。</p>
+
+                <form id="upload-form">
+                    <div class="file-drop" id="file-drop">
+                        <input type="file" id="file-input" name="file" accept=".xls,.xlsx" hidden>
+                        <div class="drop-content">
+                            <div class="drop-icon">📊</div>
+                            <p>点击选择文件 或 拖拽文件到此处</p>
+                            <p class="file-name" id="file-name">未选择文件</p>
+                        </div>
+                    </div>
+
+                    <div class="options">
+                        <fieldset class="doc-type-fieldset">
+                            <legend>文档类型</legend>
+                            <label class="radio-label">
+                                <input type="radio" name="task_type" value="zhongban" checked>
+                                <span class="doc-type-tag">模板一</span>
+                                <span class="doc-type-hint">中板厂 · 6 列基础 + 6 参数 OCR + 三视图</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="task_type" value="cscan">
+                                <span class="doc-type-tag">模板二</span>
+                                <span class="doc-type-hint">中厚板卷厂 · 13 列缺陷表格 + C/A 扫 + 板信息</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="task_type" value="kuanhouban">
+                                <span class="doc-type-tag">模板三</span>
+                                <span class="doc-type-hint">宽厚板厂 · 13 列缺陷表格 + C/A 扫 + 板信息</span>
+                            </label>
+                        </fieldset>
+
+                        <fieldset class="radio-group">
+                            <legend>识别方式</legend>
+                            <label class="radio-label">
+                                <input type="radio" name="recognition" value="llm" checked>
+                                <span class="doc-type-tag">大模型</span>
+                                <span class="doc-type-hint">本地 LLM 识别 (127.0.0.1:8080)</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="recognition" value="ocr">
+                                <span class="doc-type-tag">OCR</span>
+                                <span class="doc-type-hint">Tesseract 本地识别</span>
+                            </label>
+                        </fieldset>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" id="cancel-upload-btn">取消</button>
+                        <button type="submit" class="btn-primary" id="submit-btn" style="width:auto;flex:1;">
+                            开始处理
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ========== 进度区 ========== -->
+        <section class="progress-section" id="progress-section" style="display:none">
+            <div class="progress-card">
+                <h2>⏳ 处理进度</h2>
+                <div class="progress-info">
+                    <div class="progress-row">
+                        <span class="label">阶段:</span>
+                        <span class="value" id="progress-stage">-</span>
+                    </div>
+                    <div class="progress-row">
+                        <span class="label">消息:</span>
+                        <span class="value" id="progress-message">-</span>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-percent" id="progress-percent">0%</div>
+            </div>
+        </section>
+
+        <!-- ========== 结果区 ========== -->
+        <section class="result-section" id="result-section" style="display:none">
+            <div class="result-header">
+                <h2>📊 <span id="result-factory-label"></span>缺陷记录 (<span id="record-count">0</span>)</h2>
+                <div class="result-actions">
+                    <button class="btn-secondary" id="download-json">下载 JSON</button>
+                    <button class="btn-secondary" id="download-excel">下载 Excel</button>
+                    <button class="btn-secondary" id="download-zip">📦 打包下载</button>
+                    <button class="btn-danger" id="delete-task">🗑 删除任务</button>
+                </div>
+            </div>
+
+            <table class="record-table" id="record-table">
+                <thead>
+                    <tr>
+                        <th class="col-index sortable" data-col="序号">
+                            <span class="th-content"># <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="序号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-factory sortable" data-col="生产厂">
+                            <span class="th-content">生产厂 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="生产厂" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-plate sortable" data-col="钢板号">
+                            <span class="th-content">钢板号 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="钢板号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-grade sortable" data-col="钢种">
+                            <span class="th-content">钢种 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="钢种" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="sortable" data-col="类别">
+                            <span class="th-content">类别 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="类别" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-defect sortable" data-col="缺陷分析">
+                            <span class="th-content">缺陷分析 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="缺陷分析" title="筛选本列">⚙</button>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="record-tbody">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+
+            <div class="pagination-bar" id="pagination-bar">
+                <!-- JS 渲染分页器 -->
+            </div>
+        </section>
+
+        <!-- ========== cscan 结果区 (沿用 zhongban 的 result-section 样式) ========== -->
+        <section class="result-section" id="cscan-section" style="display:none">
+            <div class="result-header">
+                <h2>📡 <span id="cscan-result-factory-label"></span>缺陷记录 (<span id="cscan-record-count">0</span>)</h2>
+                <div class="result-actions">
+                    <button class="btn-secondary" id="cscan-download-json">下载 JSON</button>
+                    <button class="btn-secondary" id="cscan-download-excel">下载 Excel</button>
+                    <button class="btn-secondary" id="cscan-download-zip">📦 打包下载</button>
+                    <button class="btn-danger" id="cscan-delete-task">🗑 删除任务</button>
+                </div>
+            </div>
+
+            <table class="record-table" id="cscan-table">
+                <thead>
+                    <tr>
+                        <th class="col-index sortable" data-col="序号">
+                            <span class="th-content"># <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="序号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-factory sortable" data-col="生产厂">
+                            <span class="th-content">生产厂 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="生产厂" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-plate sortable" data-col="钢板号">
+                            <span class="th-content">钢板号 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="钢板号" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-grade sortable" data-col="钢种">
+                            <span class="th-content">钢种 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="钢种" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="sortable" data-col="类别">
+                            <span class="th-content">类别 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="类别" title="筛选本列">⚙</button>
+                        </th>
+                        <th class="col-defect sortable" data-col="缺陷分析">
+                            <span class="th-content">缺陷分析 <span class="sort-arrow"></span></span>
+                            <button type="button" class="th-filter-btn" data-col="缺陷分析" title="筛选本列">⚙</button>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="cscan-tbody">
+                    <!-- 动态加载 -->
+                </tbody>
+            </table>
+
+            <div class="pagination-bar" id="cscan-pagination-bar">
+                <!-- JS 渲染分页器 -->
+            </div>
+        </section>
+
+        <!-- ========== cscan 详情弹窗 (沿用 zhongban 的 record-detail-modal 样式) ========== -->
+        <div class="modal record-detail-modal" id="cscan-detail-modal">
+            <div class="modal-content" onclick="event.stopPropagation()">
+                <div id="cscan-detail-body"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 筛选弹窗 (必须在 app.js 之前, 否则 addEventListener 走不到按钮) -->
+    <div class="modal" id="filter-modal">
+        <div class="modal-content filter-modal-content">
+            <div class="filter-modal-header">
+                <h3 id="filter-modal-title">筛选</h3>
+                <div class="filter-modal-toolbar">
+                    <button type="button" class="btn-link" id="filter-select-all">全选</button>
+                    <button type="button" class="btn-link" id="filter-invert">反选</button>
+                </div>
+                <button type="button" class="modal-close" onclick="closeFilterModal()">×</button>
+            </div>
+            <div class="filter-modal-body" id="filter-modal-body">
+                <!-- 动态渲染每列 distinct 值 -->
+            </div>
+            <div class="filter-modal-footer">
+                <span class="filter-summary" id="filter-summary"></span>
+                <button type="button" class="btn-link" id="filter-clear-col" title="清除本列筛选">清除本列</button>
+                <button type="button" class="btn-secondary" onclick="closeFilterModal()">取消</button>
+                <button type="button" class="btn-primary" id="filter-apply-btn">应用筛选</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
