@@ -33,6 +33,13 @@ data/*.db-shm
 input/
 output/
 
+# 数据压缩包/目录 (不入仓)
+*.rar
+*.zip
+2026630/
+8.17内伤/
+波形图(2)/
+
 # preview.html 是早期调试文件, 忽略
 preview.html
 static_views_links/
